@@ -1,0 +1,28 @@
+[project]
+name = "llm-based-earnings-surprise-ntam"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Austinai123", email = "wsq@live.ca" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "jinja2>=3.1.6",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
+    "pandas>=2.2,<2.3",
+    "wrds>=3.5",
+]
+
+[project.scripts]
+llm-based-earnings-surprise-ntam = "llm_based_earnings_surprise_ntam:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.4.0",
+]
