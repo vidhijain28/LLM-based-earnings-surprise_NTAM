@@ -10,18 +10,25 @@ TRANSCRIPT_FOLDER = "transcripts"
 OUTPUT_CSV = "llm_scores.csv"
 
 # ---------- 1. The prompt ----------
-SYSTEM = """You are an equity analyst. You will read an earnings call transcript
-and judge how the market is likely to perceive the results relative to expectations.
-Use only the information in the transcript. Do not use any outside knowledge
-about this company or how its stock actually moved."""
+SYSTEM = """You are an equity analyst predicting the stock market's reaction to an earnings call.
+Use only the information in the transcript. Do not use outside knowledge about this company
+or how its stock actually moved."""
 
-USER_TEMPLATE = """Read the earnings call transcript below.
+USER_TEMPLATE = """Your task is to predict how this stock's one-day abnormal return (stock minus market)
+will rank against all other companies reporting earnings this quarter.
 
-Return ONLY a JSON object with these fields:
-- "surprise_score": integer from -5 (very negative surprise) to +5 (very positive surprise)
-- "guidance_tone": one of "lowered", "maintained", "raised", "none"
-- "confidence": number from 0 to 1
-- "reasons": list of up to 3 short strings explaining the score
+Be mindful that markets price news relative to expectations. Strong results that were
+already expected are neutral, not positive. Forward guidance, margins, one-time items and
+management's tone in the Q&A often matter more than the headline numbers.
+
+Steps:
+1. Identify the key news: results, guidance changes, one-time items, risks.
+2. Judge whether each item is better or worse than investors likely expected.
+3. Combine these into a single prediction.
+
+Return ONLY a JSON object:
+- "prediction": number from 0 to 1 (0 = worst reaction this quarter, 0.5 = neutral, 1 = best)
+- "reasons": list of up to 3 short strings
 
 Transcript:
 <transcript>
