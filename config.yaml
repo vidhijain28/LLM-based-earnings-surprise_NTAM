@@ -1,0 +1,43 @@
+# Pipeline configuration for `doit` (see dodo.py).
+#
+# Any of period.start, period.end and universe can be overridden at run time without editing this file:
+#   uv run doit start=2024-01-01 end=2024-12-31
+#   uv run doit start=2025-10-01 end=2025-12-31 universe=global
+#   uv run doit config=other_config.yaml
+
+period:
+  start: 2025-10-01        # first call date to include (inclusive)
+  end: 2025-12-31          # last call date to include (inclusive)
+
+universe: us               # us     = US-headquartered companies, IBES US file
+                           # global = all companies, IBES US + international files
+
+wrds_username: null        # null = WRDS default (pgpass / environment)
+
+paths:
+  raw: data/raw            # monthly WRDS pulls (cached; reused across periods)
+  interim: data/interim    # cleaned transcripts, IBES announcements, links
+  processed: data/processed
+
+transcripts:
+  version_rule: pit        # pit   = first version created for each call (what you would have had in real time)
+                           # final = Final version, latest created (best text quality, may arrive days later)
+  max_lag_days: null       # drop calls whose chosen version was created more than N days after the call
+                           # (null = keep all; e.g. 1 keeps only transcripts available by the next day)
+  min_words: 500           # drop transcripts shorter than this (empty or truncated)
+
+ibes:
+  consensus: summary       # summary = last monthly IBES consensus (statsumu) before the release
+                           # detail  = rebuilt from analyst-level estimates (detu): each analyst's latest
+                           #           estimate in the window before the release date
+  consensus_stat: median   # median | mean
+  detail_window_days: 90   # look-back window for consensus: detail
+  min_price: 1.0           # SUE is left missing when the pre-release price is below this
+
+match:
+  window_days: [-1, 3]     # accept IBES announcements with call_date - anndats in this range
+  release_cutoff_et: "16:00"  # event date = release day if released by this time (ET) on a trading day,
+                              # otherwise the next trading day (Koijen & Levy rule)
+
+output:
+  include_text: true       # include transcript text columns in the final file
