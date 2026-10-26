@@ -14,6 +14,8 @@ Tasks (each reruns only when its inputs or the relevant config section change):
     merge                 match calls to announcements, event date
     prices                pre-announcement price: close on the trading day before the event date (Compustat)
     final                 SUE, ranks, transcript text -> final parquet + report
+    returns               event-date abnormal return (CRSP daily v2, market proxy VTI)
+    sample                join returns onto the final parquet, flag the estimation sample, re-rank, baseline check
 Monthly transcript files are reused across runs; to refresh a month that was still incomplete when pulled:
     uv run doit forget transcripts:2025-12 && uv run doit
 """
@@ -22,14 +24,15 @@ import json
 from doit import get_var
 from doit.tools import config_changed
 
-from llm_based_earnings_surprise_ntam.pipeline import ibes, links, merge, prices, transcripts
-from llm_based_earnings_surprise_ntam.pipeline.config import load_config, paths
+from llm_based_earnings_surprise_ntam.pipeline import ibes, links, merge, prices, returns, sample, transcripts
+from llm_based_earnings_surprise_ntam.pipeline.config import load_config, path, paths
 
-DOIT_CONFIG = {'default_tasks': ['final'], 'verbosity': 2, 'dep_file': '.doit.db'}
+DOIT_CONFIG = {'default_tasks': ['sample'], 'verbosity': 2, 'dep_file': '.doit.db'}
 
 CFG = load_config(get_var('config', 'config.yaml'), start=get_var('start', None), end=get_var('end', None),
                   universe=get_var('universe', None))
 P = paths(CFG)
+P['returns'] = path(CFG, 'interim', f"returns_{CFG['tag']}.parquet")
 
 
 def _sig(*keys):
@@ -110,4 +113,25 @@ def task_final():
         'targets': [P['final'], P['report']],
         'uptodate': [config_changed(_sig('ibes', 'output'))],
         'clean': True,
+    }
+
+
+def task_returns():
+    """Event-date abnormal return: stock return minus market return (CRSP daily v2, market proxy VTI)."""
+    return {
+        'actions': [(returns.pull, [CFG, P['matched'], P['prices'], P['returns']])],
+        'file_dep': [P['matched'], P['prices']],
+        'targets': [P['returns']],
+        'uptodate': [config_changed(_sig('returns'))],
+        'clean': True,
+    }
+
+
+def task_sample():
+    """Add returns, the estimation-sample flag and within-quarter ranks to the final parquet; baseline check."""
+    return {
+        'actions': [(sample.build, [CFG, P['final'], P['returns']])],
+        'file_dep': [P['returns']],
+        'task_dep': ['final'],  # the columns are added to final's output, so it must be written first
+        'uptodate': [config_changed(_sig('sample')), lambda: sample.has_columns(P['final'])],
     }

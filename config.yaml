@@ -12,7 +12,7 @@ period:
 universe: us               # us     = US-headquartered companies, IBES US file
                            # global = all companies, IBES US + international files
 
-wrds_username: null        # null = WRDS default (pgpass / environment)
+wrds_username: zhenyaozhu        # null = WRDS default (pgpass / environment)
 
 paths:
   raw: data/raw            # monthly WRDS pulls (cached; reused across periods)
@@ -46,3 +46,12 @@ match:
 
 output:
   include_text: true       # include transcript text columns in the final file
+
+# --- extension: event-date returns and estimation sample (PIPELINE.md section 5) ---
+
+returns:
+  market_permno: 90878     # CRSP permno of the market proxy (90878 = VTI, the ETF used by Koijen & Levy)
+
+sample:
+  require_transcript_by_event_close: false  # also require the chosen transcript to exist by 16:00 ET on the event date
+  baseline_r2_warn: 0.05                    # warn when the surprise-only R2 falls below this (paper: 5.0%)

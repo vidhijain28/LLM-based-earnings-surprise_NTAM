@@ -175,3 +175,99 @@ A quarter of US calls with text is about 120 MB as parquet.
 - **Non-US (`universe: global`):** about 90% of calls match, but only about half get a SUE (semi-annual reporters, thin analyst coverage), and `event_date` is left empty (NYSE calendar only).
 - **The consensus vendor differs from the paper.** The paper's main source is Benzinga; IBES is the paper's own robustness source. The consensus rule here is as close as IBES allows, but small differences remain (which analysts count, and how long an estimate stays valid).
 - **Returns are not included yet.** Abnormal returns on `event_date` (e.g. from Compustat daily prices, as used for the SUE price) are the next step.
+
+---
+
+## 5. Extension: event-date abnormal return and explanatory-power baseline check
+
+Two tasks added on top of the pipeline above (`returns`, `sample`). They produce the dependent variable the LLM work needs — the abnormal return around the announcement — and check that the dataset is aligned before any LLM money is spent. This supersedes the last bullet of section 4 ("Returns are not included yet").
+
+Nothing in the existing pipeline code changed: the steps are two new modules (`pipeline/returns.py`, `pipeline/sample.py`) wired in through `dodo.py`, with their settings in the new `returns:` and `sample:` sections of `config.yaml`.
+
+### How to run it
+
+`doit` now runs through `sample` by default, so the usual command does everything:
+
+```bash
+uv run doit                      # transcripts -> ... -> final -> returns -> sample
+uv run doit returns              # just the returns step
+uv run doit sample               # just the sample step (re-runs `final` first if needed)
+```
+
+Both steps are incremental like the rest: `returns` reruns when `matched`/`prices` or the `returns:` config change; `sample` reruns when the returns file or the `sample:` config change, **or when the columns it adds are missing from the final parquet** (which happens whenever `final` rewrites it).
+
+### Step 5. Abnormal return (`returns`)
+
+**Source:** CRSP daily v2 (`crsp.dsf_v2`), column `dlyret` — total return, dividends included.
+
+| Decision | What we do | Why |
+|---|---|---|
+| Return table | `crsp.dsf_v2`, not `crsp.dsf` | The classic CRSP daily files (`crsp.dsf`, `crsp.dsi`, `crsp.dsix`) **stop at 2024-12-31** on WRDS and cannot cover recent quarters. The v2 file runs to 2025-12-31. |
+| Market proxy | **VTI** (CRSP permno 90878), `returns.market_permno` | The ETF Koijen & Levy use. CRSP's own value-weighted index (`vwretd`) would be the usual substitute, but its daily file ends in 2024. |
+| Abnormal return | `r_abn = ret − mkt_ret` on `event_date` | The paper's market-adjusted return, a one-day window. Using CRSP's `ret` rather than differencing the unadjusted Compustat closes keeps dividends and splits handled. |
+| gvkey → permno | `crsp.ccmxpf_lnkhist`, primary links only (`linktype LU/LC`, `linkprim P/C`), valid **on the event date**; `P` preferred, lowest permno breaks ties | Same link the `ccm` route uses, but it is re-derived here so `links.py` is untouched. `n_permno_candidates` records how many permnos the call had. |
+| Which calls | Matched calls with an `event_date` and a `gvkey` | Without an event date there is no day to measure, and non-US calls have no event date (section 4). |
+| Sanity check | Compares `close / price − 1` (event-day close over the t−1 close already used for the SUE) with `dlyret`, and prints how many differ by more than 1pp | Catches a misaligned event date, a wrong permno, or a split/dividend on the event day. |
+
+Output: `interim/returns_<period>.parquet` — `keydevid, permno, event_date, ret, mkt_ret, r_abn, n_permno_candidates`.
+
+### Step 6. Estimation sample and baseline check (`sample`)
+
+Adds seven columns **to the existing final parquet, in place** (row order and existing columns untouched; a rerun replaces these columns rather than duplicating them):
+
+| Column | Meaning |
+|---|---|
+| `permno`, `ret`, `mkt_ret`, `r_abn` | from the returns step |
+| `in_sample` | passes every filter below — the rows to estimate on |
+| `r_abn_pct` | percentile rank of `r_abn` within `event_quarter`, over `in_sample` rows only |
+| `sue_pct_sample` | percentile rank of `sue` within `event_quarter`, **re-ranked over `in_sample` rows** (the pipeline's own `sue_pct` is ranked over all rows of the file, so it is not the right regressor once rows are dropped) |
+
+Sample filters, printed as a chain so you can see where rows go:
+
+| Filter | Setting |
+|---|---|
+| `matched` | fixed |
+| `sue` present | fixed |
+| `r_abn` present | fixed |
+| `transcript_by_event_close` | `sample.require_transcript_by_event_close` (default `false`) |
+
+**The baseline check.** The task then runs the surprise-only regression that the LLM has to beat:
+
+```
+PRank(r_abn) = a + b * PRank(sue)
+```
+
+and prints `N`, `b`, its t-statistic and the R². Koijen & Levy report **b = 0.219 and R² = 5.0%** for this regression (Table 2, column 1). The R² is a single check on the event date, the ticker match, the consensus and the returns at once: if any of them is misaligned, it collapses toward zero.
+
+When the R² falls below `sample.baseline_r2_warn` (default 0.05) the task prints a **WARNING**. Treat it as "look before going further", not as a hard failure — a value a little under 5% is expected, since this sample is not the paper's (I/B/E/S instead of Benzinga, a different market proxy, and about 2,600 calls against their 1,849).
+
+### Current run (Q4 2025, US, default config)
+
+**Where the rows go.** The two steps print two different chains, so their counts do not line up row for row:
+
+| Rows | Filter | Step | Note |
+|---|---|---|---|
+| 2,995 | all calls in the final file | — | unmatched calls included |
+| 2,865 | `matched` | `sample` | 95.6% of calls. `matched` means the call was successfully paired with an IBES earnings announcement (step 4). |
+| 2,864 | `matched` & `event_date` & `gvkey` | `returns` | the one call dropped here has no `gvkey`, so there is no security to price. No US call lacks an event date; that only bites with `universe: global`. |
+| 2,827 | of those, CRSP had a return | `returns` | 98.7%; a permno was found for 98.8% |
+| 2,603 | `matched` & `sue` | `sample` | a SUE also needs a consensus and a price >= `ibes.min_price` |
+| **2,586** | **`in_sample`** — also has `r_abn` | `sample` | the 17 calls lost here have a SUE but no permno (firms absent from CRSP: recent IPOs, foreign private issuers, trusts) |
+
+The two chains overlap but are not nested: `r_abn` exists for 2,827 matched calls, more than the 2,603 with a SUE, because a return only needs a permno while a SUE also needs a consensus and a valid price.
+
+| Other checks | |
+|---|---|
+| Price cross-check beyond 1pp | 2 of 2,826 |
+| Abnormal return | mean 0.07%, SD 11.0% (paper's Table 1: SD 11%) |
+| **Baseline regression** | b = 0.217 (t = 11.3), **R² = 4.7%** on N = 2,586 |
+
+The slope is within 0.002 of the paper's 0.219 and the R² within 0.3pp of its 5.0%, on a different quarter and a different consensus vendor — the dataset lines up.
+
+### Known limitations of the extension
+
+- **CRSP daily v2 ends 2025-12-31** on WRDS. Calls with a later event date get no return; the task warns when that happens.
+- **Non-US calls get no return**, because they have no `event_date` (NYSE calendar only, section 4).
+- **One-day window only.** The project's longer horizons (1, 4, 12 weeks) would need cumulative returns, which these tasks do not compute.
+- **VTI is an ETF, not an index.** Its return includes a tracking difference and its own dividend timing. The effect on a one-day market-adjusted return is small, but it is not identical to a value-weighted market return.
+- **The `price` column is still the t−1 close** used for the SUE; the event-day close is not stored as a column, only used inside the cross-check.

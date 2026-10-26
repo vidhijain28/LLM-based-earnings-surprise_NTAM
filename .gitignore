@@ -1,3 +1,4 @@
 data/
 .doit.db*
 __pycache__/
+_internal.ipynb
