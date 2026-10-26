@@ -27,12 +27,17 @@ transcripts:
   min_words: 500           # drop transcripts shorter than this (empty or truncated)
 
 ibes:
-  consensus: summary       # summary = last monthly IBES consensus (statsumu) before the release
-                           # detail  = rebuilt from analyst-level estimates (detu): each analyst's latest
-                           #           estimate in the window before the release date
-  consensus_stat: median   # median | mean
-  detail_window_days: 90   # look-back window for consensus: detail
-  min_price: 1.0           # SUE is left missing when the pre-release price is below this
+  consensus: detail        # detail  = built from analyst-level estimates (detu): each analyst's latest estimate made
+                           #           before the release (same-day estimates count if made before the release time),
+                           #           made or confirmed within detail_window_days, and not stopped by the broker
+                           #           (closest to the paper's consensus "right before the release")
+                           # summary = last monthly IBES consensus snapshot (statsumu) before the release day
+  consensus_stat: mean     # mean (as in the paper) | median
+  detail_window_days: 90   # an estimate must have been made or last confirmed within this many days of the release
+  price_source: compustat  # compustat = close on the trading day before the event date (Compustat daily, primary
+                           #              US issue), falling back to the IBES price when unavailable
+                           # ibes       = last monthly IBES price snapshot before the release
+  min_price: 1.0           # SUE is left missing when the pre-announcement price is below this
 
 match:
   window_days: [-1, 3]     # accept IBES announcements with call_date - anndats in this range

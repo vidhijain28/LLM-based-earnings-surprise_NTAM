@@ -28,6 +28,9 @@ def load_config(path='config.yaml', start=None, end=None, universe=None):
         raise ValueError("transcripts.version_rule must be 'pit' or 'final'")
     if cfg['ibes']['consensus'] not in ('summary', 'detail'):
         raise ValueError("ibes.consensus must be 'summary' or 'detail'")
+    if cfg['ibes'].get('price_source', 'compustat') not in ('compustat', 'ibes'):
+        raise ValueError("ibes.price_source must be 'compustat' or 'ibes'")
+    cfg['ibes'].setdefault('price_source', 'compustat')
 
     cfg['period'] = {'start': str(start.date()), 'end': str(end.date())}
     cfg['tag'] = f"{start:%Y%m%d}_{end:%Y%m%d}_{cfg['universe']}"
@@ -56,6 +59,8 @@ def paths(cfg):
         'text': path(cfg, 'interim', f'transcript_text_{tag}.parquet'),
         'ibes': path(cfg, 'interim', f'ibes_announcements_{tag}.parquet'),
         'links': path(cfg, 'interim', f'ibes_links_{tag}.parquet'),
+        'matched': path(cfg, 'interim', f'matched_{tag}.parquet'),
+        'prices': path(cfg, 'interim', f'prices_{tag}.parquet'),
         'final': path(cfg, 'processed', f'earnings_calls_ibes_{tag}.parquet'),
         'report': path(cfg, 'processed', f'earnings_calls_ibes_{tag}_report.json'),
     }

@@ -37,8 +37,10 @@ The run is incremental. Each task reruns only when its inputs or its part of the
 | `processed/earnings_calls_ibes_<start>_<end>_<universe>.parquet` | **The final dataset** (one row per call) |
 | `processed/..._report.json` | Match statistics for the run, plus the config used |
 | `interim/calls_*.parquet`, `interim/transcript_text_*.parquet` | Cleaned transcript metadata and text |
-| `interim/ibes_announcements_*.parquet` | IBES announcements with consensus and SUE |
+| `interim/ibes_announcements_*.parquet` | IBES announcements with actual EPS and consensus |
 | `interim/ibes_links_*.parquet` | Candidate IBES tickers for each call |
+| `interim/matched_*.parquet` | Calls matched to IBES, with event date (before SUE) |
+| `interim/prices_*.parquet` | Close on the trading day before each event date |
 | `raw/ciq_transcripts_<universe>_<rule>_<YYYY-MM>.parquet` | Monthly WRDS pulls (cache) |
 
 Read the final file with `pd.read_parquet(path)`. Filter on `matched` and/or `sue.notna()` for the estimation sample.
@@ -52,14 +54,20 @@ Read the final file with `pd.read_parquet(path)`. Filter on `matched` and/or `su
           |                              |                                 |
   transcripts:YYYY-MM              ibes                             links
   earnings calls, one version      announcements, actual EPS,       CIQ company -> candidate
-  per call, full text              consensus, price, SUE            IBES tickers (4 routes)
+  per call, full text              pre-release consensus            IBES tickers (4 routes)
           |                              |                                 |
   transcripts_clean                      |                                 |
   period, length, duplicates             |                                 |
           \______________________________|_________________________________/
                                          |
                                        merge
-                       match call <-> announcement, event date, ranks
+                          match call <-> announcement, event date
+                                         |
+                                      prices
+                        close on the trading day before the event date
+                                         |
+                                       final
+                          SUE, within-quarter ranks, transcript text
                                          |
                          earnings_calls_ibes_<period>.parquet
 ```
@@ -81,17 +89,17 @@ Read the final file with `pd.read_parquet(path)`. Filter on `matched` and/or `su
 
 ### Step 2. I/B/E/S (`ibes`)
 
-**Source:** I/B/E/S on WRDS: the US file, plus the international file for `global`. All tables are the **unadjusted** versions (`actu_`, `statsumu_`, `detu_`, `actpsumu_`), so actual, consensus and price are all on the same per-share basis on the announcement date. Split-adjusted values are rounded and distort small surprises.
+**Source:** I/B/E/S on WRDS: the US file, plus the international file for `global`. All tables are the **unadjusted** versions (`actu_`, `statsumu_`, `detu_`, `stopu_`), so actual and consensus are on the same per-share basis on the announcement date. Split-adjusted values are rounded and distort small surprises.
+
+The defaults follow Koijen & Levy: the **mean** consensus **right before the release**, scaled by the **price just before the announcement**.
 
 | Decision | What we do | Why |
 |---|---|---|
 | Unit of observation | One row per **announcement** (IBES ticker x announcement date) | A release can carry several actuals: a Q4 release also reports the annual figure. |
 | Which actual | **Quarterly** EPS if present, else semi-annual, else annual | The consensus and SUE are quarterly. Semi-annual reporters (mostly Europe and Asia) are kept, but get no SUE. |
 | Measure | IBES "street" EPS | It is on the same basis analysts forecast, so actual and consensus are comparable (not GAAP). |
-| Consensus | Default `summary`: the **last monthly IBES consensus before the announcement date** (current quarter, `fpi = 6`). Option `detail`: rebuilt from individual analysts, taking each analyst's latest estimate within the last 90 days | The summary is IBES's standard. It is a median of about 19 days old at the release. The detail version is fresher but covers fewer analysts. The two SUEs have a rank correlation of 0.91. |
-| Price | Last IBES price snapshot before the announcement (within 45 days) | Scales the surprise. |
-| SUE | `(actual - consensus) / price`, with the median consensus by default (`consensus_stat`) | Standard definition; the baseline the LLM signal must beat. |
-| SUE left missing | Price below $1 (`min_price`), currencies of actual / consensus / price differ, or no consensus | Penny-stock prices make SUE explode. Mixed currencies are not comparable. |
+| Consensus | Default `detail`: built from **individual analyst estimates** for the quarter. For each analyst, take the latest estimate that was (1) **made before the release** (an earlier day, or the release day before the release time), (2) **made or last confirmed within 90 days** (`detail_window_days`), and (3) **not stopped** by the broker before the release. Then take the mean (`consensus_stat`). Option `summary`: the last monthly IBES consensus snapshot before the release day. | The paper uses the consensus right before the release. The monthly snapshot is a median of about 20 days old and misses late revisions; in Q4 2025, using it instead changes beat/miss for about 9.5% of events. The detail rule drops estimates nobody has confirmed for 90+ days, which the monthly snapshot keeps, so it covers slightly fewer events (mostly 1-2-analyst firms). |
+| Consensus currency | Dropped if the estimates are in a different currency than the actual | Not comparable. |
 
 ### Step 3. Linking companies (`links`)
 
@@ -106,7 +114,7 @@ CIQ has no IBES identifier, so each call gets **candidate IBES tickers** from fo
 
 When two routes both find a ticker, they agree 94-98% of the time. About 99% of calls get at least one candidate. The announcement date decides which candidate is correct (Step 4).
 
-### Step 4. Matching and final dataset (`merge`)
+### Step 4. Matching, price and final dataset (`merge`, `prices`, `final`)
 
 | Decision | What we do | Why |
 |---|---|---|
@@ -115,6 +123,9 @@ When two routes both find a ticker, they agree 94-98% of the time. About 99% of 
 | One call per announcement | If two calls match the same announcement, keep the closer one, then the longer transcript | Leftover CIQ duplicates. |
 | Unmatched calls | **Kept**, with `matched = False` and empty IBES fields | Lets you see coverage, and keeps the text for uses that do not need IBES. |
 | Event date | The **release day if released by 16:00 ET on a trading day, otherwise the next trading day** (NYSE calendar). US companies only. | The paper's rule. This is the day of the return you would explain. It equals the call date only about 64% of the time. |
+| Price | **Close on the trading day before the event date** (the t-1 close), from Compustat daily prices (`comp.secd`), primary US share line, unadjusted. If unavailable, fall back to the last IBES price snapshot. `price_source` records which was used. `ibes.price_source: ibes` uses the IBES price throughout. | The paper scales by the price just before the announcement. For a release after the close this is that day's close; for a pre-market release, the previous day's close. In Q4 2025, 99.8% of SUEs use the t-1 close. |
+| SUE | `(actual - consensus) / price` | The paper's surprise; the baseline the LLM signal must beat. |
+| SUE left missing | No consensus, price below $1 (`min_price`), or the price is in a different currency than the actual | Penny-stock prices make SUE explode. |
 | Transcript availability | `transcript_by_event_close`: was the chosen version created by 16:00 ET on the event date? | 90% are. Filter on it if the text must be available by the close. |
 | SUE rank | `sue_pct`: percentile of SUE within the event quarter | The paper ranks surprises within the quarter. |
 
@@ -131,25 +142,25 @@ When two routes both find a ticker, they agree 94-98% of the time. About 99% of 
 | after dropping duplicate CIQ events | 2,998 |
 | after keeping one call per IBES announcement | **2,995** (final rows) |
 | matched to an IBES announcement | 2,864 (95.6%) |
-| with a SUE | 2,685 (89.6%) |
+| with a SUE | 2,602 (86.9%) |
 
-**Why some rows have no SUE:** 131 calls have no IBES announcement in the window. Among matched calls, the gaps overlap, so the counts don't add up: 119 have no consensus (not covered by analysts that quarter), 107 have no reported actual, 106 have no price, and 47 have a price below $1.
+**Why some rows have no SUE:** 131 calls have no IBES announcement in the window. Among matched calls, the gaps overlap, so the counts don't add up: 210 have no consensus (no analyst estimate made or confirmed in the 90 days before the release), 107 have no reported actual, 73 have a price below $1, and 2 have no price.
 
-**Typical values:** a transcript has a median of 6.3k words. A consensus has a median of 6 analysts and is a median of 19 days old at the release. The chosen transcript appeared a median of about 1.3 hours after the call, and 98% within a day. The event date is the call date 64% of the time and the next trading day 35% of the time.
+**Typical values:** a transcript has a median of 6.3k words. A consensus has a median of 5 analysts, and the most recent estimate in it was made a median of 24 days before the release (older estimates count if they were confirmed since). The chosen transcript appeared a median of about 1.3 hours after the call, and 98% within a day. The event date is the call date 64% of the time and the next trading day 35% of the time.
 
-**Columns of the final file (53)**
+**Columns of the final file (57)**
 
 | Group | Columns |
 |---|---|
-| Call identifiers | `keydevid` (CIQ event), `transcriptid` (chosen version), `companyid`, `companyname`, `headline`, `country` |
+| Call identifiers | `keydevid` (CIQ event), `transcriptid` (chosen version), `companyid`, `gvkey` (Compustat), `companyname`, `headline`, `country` |
 | Call timing | `call_date`, `call_time_utc`, `call_datetime_utc` |
 | Transcript version | `presentation_type` (Preliminary / Final), `collection_type`, `created_utc`, `transcript_lag_days`, `n_versions`, `first_created_utc` |
 | Transcript text | `full_text`, `presentation_text`, `qa_text` (set `output.include_text: false` to drop them) |
 | Transcript stats | `n_words`, `n_words_presentation`, `n_words_qa`, `n_components`, `n_questions`, `n_analysts`, `audio_sec` |
 | Link | `matched`, `ticker` (IBES), `link_route`, `routes`, `ibes_file` (US / Intl), `match_gap_days`, `ticker_tie` |
 | Announcement | `anndats`, `anntims` (ET), `pdicity` (QTR / SAN / ANN), `pends` (fiscal period end) |
-| Earnings | `actual`, `curr_act`, `consensus`, `consensus_median`, `consensus_mean`, `consensus_std`, `n_estimates`, `consensus_date`, `consensus_age_days` |
-| Surprise | `price`, `price_date`, `surprise` (actual - consensus), `sue`, `sue_pct`, `event_quarter` |
+| Earnings | `actual`, `curr_act`, `consensus` (the configured statistic), `consensus_mean`, `consensus_median`, `consensus_std`, `n_estimates`, `consensus_date` (most recent estimate, or the snapshot date for `summary`), `consensus_age_days` |
+| Surprise | `surprise` (actual - consensus), `price`, `price_date`, `price_source` (t-1 close or IBES snapshot), `price_ibes`, `price_ibes_date`, `sue`, `sue_pct`, `event_quarter` |
 | Event | `event_date`, `transcript_by_event_close` |
 
 A quarter of US calls with text is about 120 MB as parquet.
@@ -162,5 +173,5 @@ A quarter of US calls with text is about 120 MB as parquet.
 - **The latest month can be incomplete.** CIQ keeps adding transcripts for recent calls. Re-pull with `doit forget transcripts:YYYY-MM`.
 - **Some misses are data disagreements, not bugs.** Examples: an IBES date set by a preliminary release a week before the call (Skyworks, Q4 2025), or a company whose identifiers changed after a merger (fuboTV). We do not fuzzy-match on names or tickers, to avoid wrong matches.
 - **Non-US (`universe: global`):** about 90% of calls match, but only about half get a SUE (semi-annual reporters, thin analyst coverage), and `event_date` is left empty (NYSE calendar only).
-- **The `detail` consensus is a simple rebuild.** It uses a fixed 90-day window and does not yet use IBES's stopped-estimate file.
-- **Returns are not included yet.** Abnormal returns on `event_date` (CRSP or another price source) are the next step.
+- **The consensus vendor differs from the paper.** The paper's main source is Benzinga; IBES is the paper's own robustness source. The consensus rule here is as close as IBES allows, but small differences remain (which analysts count, and how long an estimate stays valid).
+- **Returns are not included yet.** Abnormal returns on `event_date` (e.g. from Compustat daily prices, as used for the SUE price) are the next step.

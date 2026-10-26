@@ -68,6 +68,8 @@ def build(cfg, calls_path, target):
     cand = (cand.sort_values('route_rank').groupby(['keydevid', 'ticker'], as_index=False)
                 .agg(route_rank=('route_rank', 'min'), routes=('route', '+'.join)))
     cand['link_route'] = cand.route_rank.map(dict(enumerate(ROUTES)))
+    # the call's date-aware gvkey travels with the candidates (used for Compustat prices)
+    cand = cand.merge(g[['keydevid', 'gvkey']], on='keydevid', how='left')
     cand.to_parquet(target, index=False)
     n = calls.keydevid.isin(cand.keydevid).mean()
     print(f'Links: {len(cand):,} (call, IBES ticker) candidates; {n:.1%} of {len(calls):,} calls have at least one '
