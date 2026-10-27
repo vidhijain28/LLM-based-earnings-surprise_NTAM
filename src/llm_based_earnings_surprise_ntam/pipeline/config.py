@@ -1,9 +1,11 @@
 """Load config.yaml, apply command-line overrides, and derive file paths."""
+import os
 from pathlib import Path
 
 import pandas as pd
 import wrds
 import yaml
+from wrds.sql import WRDS_POSTGRES_HOST
 
 ROOT = Path(__file__).resolve().parents[3]
 UNIVERSES = ('us', 'global')
@@ -67,5 +69,23 @@ def paths(cfg):
 
 
 def connect(cfg):
-    user = cfg.get('wrds_username')
+    """WRDS connection as `wrds_username`, else $WRDS_USERNAME, else the user saved in your pgpass file."""
+    user = cfg.get('wrds_username') or os.environ.get('WRDS_USERNAME') or _pgpass_user()
     return wrds.Connection(wrds_username=user) if user else wrds.Connection()
+
+
+def _pgpass_user():
+    """Username of the WRDS line in the pgpass file that `wrds.Connection()` offers to create (only that field)."""
+    if os.environ.get('PGPASSFILE'):
+        pgpass = Path(os.environ['PGPASSFILE'])
+    elif os.name == 'nt':
+        pgpass = Path(os.environ.get('APPDATA', '')) / 'postgresql' / 'pgpass.conf'
+    else:
+        pgpass = Path.home() / '.pgpass'
+    if not pgpass.is_file():
+        return None
+    for line in pgpass.read_text().splitlines():
+        fields = line.split(':')
+        if len(fields) >= 5 and fields[0] == WRDS_POSTGRES_HOST:
+            return fields[3]
+    return None

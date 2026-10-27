@@ -12,7 +12,8 @@ period:
 universe: us               # us     = US-headquartered companies, IBES US file
                            # global = all companies, IBES US + international files
 
-wrds_username: zhenyaozhu        # null = WRDS default (pgpass / environment)
+wrds_username: null        # null = $WRDS_USERNAME, else the username saved in your pgpass file
+                           # (keep personal usernames out of this shared file)
 
 paths:
   raw: data/raw            # monthly WRDS pulls (cached; reused across periods)
