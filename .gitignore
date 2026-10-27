@@ -2,3 +2,15 @@ data/
 .doit.db*
 __pycache__/
 _internal.ipynb
+
+# Licensed data (WRDS / I/B/E/S / Capital IQ, under the NDA): never commit, even outside data/
+*.parquet
+*.sas7bdat
+transcripts/
+summarized_transcripts/
+llm_scores.csv
+
+# Local tooling and OS clutter
+.venv/
+.ipynb_checkpoints/
+.DS_Store
