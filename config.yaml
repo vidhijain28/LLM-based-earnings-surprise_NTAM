@@ -12,7 +12,7 @@ period:
 universe: us               # us     = US-headquartered companies, IBES US file
                            # global = all companies, IBES US + international files
 
-wrds_username: zhenyaozhu        # null = WRDS default (pgpass / environment)
+wrds_username: tkwsean        # null = WRDS default (pgpass / environment)
 
 paths:
   raw: data/raw            # monthly WRDS pulls (cached; reused across periods)
