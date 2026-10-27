@@ -42,3 +42,10 @@ The output folders can be changed under `paths:` in `config.yaml`.
 
 See **[PIPELINE.md](PIPELINE.md)** for the process, the data decisions (what is kept and dropped), the output columns
 and the known limitations.
+
+## LLM step: summarize, score, evaluate
+
+Reads the final dataset above, has a local LLM (Ollama) summarize each call and predict its stock reaction, and
+measures how much of the abnormal return the prediction explains beyond the surprise.
+
+See **[LLM_README.md](LLM_README.md)** for the commands (pilot run, full run, text sources) and the output files.
