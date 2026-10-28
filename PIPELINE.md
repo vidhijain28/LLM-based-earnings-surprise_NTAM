@@ -326,7 +326,7 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
 
 - **Most of it is priced on day 0.** The surprise explains 5.7% of day-0 returns but 0.3% of week one (rank R², the regression of step 6). The week-one gain builds over days 2–5 (+1.0%), not on day 1 (+0.1%).
 - **Large caps drift more, and for longer**, on both datasets. It is not a few names: dropping the 10 best and 10 worst per side still gives +2.3%, the median spread is +2.05%, and it is positive in each of the four busiest reporting weeks (+2.1%, +2.1%, +2.8%, +2.9%). It is a top-end effect: +1.2% for all US-incorporated firms, +1.1% at $2bn and up, +2.4% at $10bn and up.
-- **Why we don't believe it yet:** the literature says large-cap drift is gone. [Martineau (2022)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3111607), "Rest in Peace Post-Earnings Announcement Drift", finds none in large caps since 2006: prices react fully on the announcement day. One quarter could be sector or factor exposure, so it needs industry adjustment and more quarters.
+- **Why we don't believe it yet:** the literature says large-cap drift is gone. [Martineau (2022)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3111607), "Rest in Peace Post-Earnings Announcement Drift", finds none in large caps since 2006: prices react fully on the announcement day. It is not an industry bet ([section 7.4](#74-is-the-stage-gate-1-spread-an-industry-bet)), but one quarter could still be factor exposure, so it needs characteristic adjustment and more quarters.
 
 ### Robustness
 
@@ -365,7 +365,7 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
   long_short(stock, mkt, quantile(score), event_dates, signal=score)  # one row per window
   ```
 
-- **Next:** CRSP for 2024–25 through this pipeline (about 8 quarters instead of 1), industry and characteristic adjustment, calendar-time portfolios. Then stage gate 2: costs, turnover, long-only.
+- **Next:** CRSP for 2024–25 through this pipeline (about 8 quarters instead of 1), size and characteristic adjustment, calendar-time portfolios. Then stage gate 2: costs, turnover, long-only.
 - **Open question:** for stage gate 1, should we focus on one week in large caps, or on 4–12 weeks?
 
 ---
