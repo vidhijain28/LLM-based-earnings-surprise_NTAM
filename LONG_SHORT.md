@@ -77,6 +77,10 @@ Code: `src/llm_based_earnings_surprise_ntam/signals/long_short.py` (the method) 
   returns are winsorized at 1% and 99%. Without winsorizing, week one is unchanged.
 - **No value weights:** Compustat's market cap is wrong for some ADRs (LATAM comes out at about $27
   trillion: local share count times the ADR price), so size cuts use US-incorporated firms.
+- **Gross returns:** no commissions, spreads, borrow fees or partial fills; every trade fills at the day-0
+  close. Break-even is about 0.27% per trade for the full sample (the 1.1% one-week gap over four
+  trades: buy, sell, short, cover) and about 0.6% for large caps. Costs and a realistic simulation are
+  stage gate 2.
 - **Why Compustat:** CRSP daily on WRDS ends Dec 31, 2025, too early for 4- and 12-week windows on Q4
   events. On day 0 the two agree: the rank R² on the pipeline's calls is 4.8% with Compustat and 4.7%
   with CRSP (section 5 of `PIPELINE.md`).
