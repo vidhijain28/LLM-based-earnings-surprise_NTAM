@@ -264,6 +264,8 @@ The two chains overlap but are not nested: `r_abn` exists for 2,827 matched call
 
 The slope is within 0.002 of the paper's 0.219 and the R² within 0.3pp of its 5.0%, on a different quarter and a different consensus vendor — the dataset lines up.
 
+An independent rebuild of this regression from Compustat prices and the monthly I/B/E/S snapshot, and a test that the surprise explains returns best on the event day itself, are in [section 7.1](#71-independent-baseline-and-event-date-alignment).
+
 ### Known limitations of the extension
 
 - **CRSP daily v2 ends 2025-12-31** on WRDS. Calls with a later event date get no return; the task warns when that happens.
@@ -290,7 +292,7 @@ uv run python scripts/long_short_q4_2025.py ../data/processed <output folder> \
     --pipeline data/processed/earnings_calls_ibes_20251001_20251231_us.parquet
 ```
 
-The first argument is the folder with Hazel's cleaned Q4 2025 files (`events_baseline.parquet`, `prices_clean.parquet`, `market_ret.parquet`). They are licensed WRDS data, so they stay outside the repo. `--pipeline` adds the same test on this pipeline's `in_sample` calls. A run takes about a minute and writes `long_short_results.csv` (one row per check and window), `long_short_large_cap_stress.csv`, `long_short_path.csv` (the charts' numbers) and the charts.
+The first argument is the folder with Hazel's cleaned Q4 2025 files (`events_baseline.parquet`, `prices_clean.parquet`, `market_ret.parquet`). They are licensed WRDS data, so they stay outside the repo; how they are built and checked is in [section 7.2](#72-the-compustat-price-panel-behind-section-6). `--pipeline` adds the same test on this pipeline's `in_sample` calls. A run takes about a minute and writes `long_short_results.csv` (one row per check and window), `long_short_large_cap_stress.csv`, `long_short_path.csv` (the charts' numbers) and the charts.
 
 ### The trade
 
@@ -345,7 +347,7 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
 
 - **One quarter:** 59 event dates, with 86% of events in four weeks. Overlapping windows make the 4- and 12-week t-statistics optimistic. More quarters and calendar-time portfolios fix both.
 - **12 weeks covers only early reporters** (up to Nov 3), which are bigger (median price $44 vs $15).
-- **Market-adjusted only:** no industry, size or characteristic adjustment yet.
+- **Market-adjusted only:** no industry, size or characteristic adjustment yet. A SIC-to-Fama-French-12 mapping for the industry step is in [section 7.3](#73-fama-french-12-industries).
 - **Gross returns:** no commissions, spreads, borrow fees or market impact, and every trade fills at the day-0 close. Break-even is about **0.27% per trade** for all events (the 1.1% one-week spread over four trades: buy, sell, short, cover) and about **0.6%** for large caps. Costs and a realistic simulation are stage gate 2.
 - **Compustat, not CRSP:** no dividend factor for about 40% of stocks (price return only). On day 0 the sources agree: on this pipeline's calls the rank R² is 4.8% with Compustat and 4.7% with CRSP (step 6).
 - **No value weights:** Compustat's market cap is wrong for some ADRs (LATAM comes out at about $27 trillion: the local share count times the ADR price), so size cuts use US-incorporated firms.
@@ -365,3 +367,65 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
 
 - **Next:** CRSP for 2024–25 through this pipeline (about 8 quarters instead of 1), industry and characteristic adjustment, calendar-time portfolios. Then stage gate 2: costs, turnover, long-only.
 - **Open question:** for stage gate 1, should we focus on one week in large caps, or on 4–12 weeks?
+
+---
+
+## 7. Replication checks and industry mapping
+
+Three additions that sit next to the pipeline. They come from an independent replication built on Compustat prices.
+
+### 7.1 Independent baseline and event-date alignment
+
+The same surprise-only regression as section 5, rebuilt from different sources:
+
+| | Section 5 (this pipeline) | Independent check |
+|---|---|---|
+| Events | 2,586 `in_sample` calls (a transcript is required) | 3,632 I/B/E/S announcements (no transcript requirement) |
+| Returns | CRSP `dlyret` | Compustat daily prices: total return where the dividend factor exists, otherwise price return |
+| Consensus | analyst-level, built right before the release | last monthly I/B/E/S snapshot (median about 19 days old) |
+| Surprise-only R² | 4.7% (b = 0.217) | **5.7%** (b = 0.239; 99% bootstrap interval 3.7% to 7.7%) |
+
+The paper reports 5.0% (b = 0.219). Three things differ at once (returns, consensus, sample), so agreement is a consistency check, not a like-for-like replication. The independent R² stays between 5.4% and 6.3% when the sample is restricted to two or more analysts, a price of at least $5, or both.
+
+**Alignment test.** If the event date, the time zone and the returns line up, the surprise should explain abnormal returns best on the event day and little on the days around it. R² of the abnormal-return rank on the surprise rank, by trading-day offset from `event_date`:
+
+| Offset (trading days) | −2 | −1 | **0** | +1 | +2 |
+|---|---|---|---|---|---|
+| R² | 0.002 | 0.001 | **0.057** | 0.001 | 0.001 |
+
+The two release-time groups are tested separately, because a wrong event-date rule can hurt one group and hide in the pooled result. Announcements at or before 16:00 ET peak on day 0 (R² 0.068) and so do those after 16:00 (0.050). I/B/E/S announcement times are U.S. Eastern clock times.
+
+### 7.2 The Compustat price panel behind section 6
+
+Section 6 needs returns after 2025-12-31, where CRSP daily v2 ends (section 5), so it uses a cleaned Compustat panel. The files are `events_baseline.parquet`, `prices_clean.parquet` and `market_ret.parquet`.
+
+| Step | What |
+|---|---|
+| Source | Compustat daily security file (WRDS export), 2025-09-02 to 2026-01-30: 105 trading days, the days VTI traded |
+| Filter | Drop rows with a missing or non-positive close, and non-USD securities: 2.17M rows become 1.79M |
+| Return | Close to close. Total return (dividend factor) where it exists on both days, otherwise split-adjusted price return: 62% and 38% of returns. A return needs the previous record to be the previous trading day and the previous close to be at least $0.01. Nothing is imputed |
+| Market | VTI, from the same file |
+
+Checks:
+- A market built from the panel's own stock returns (cap-weighted, U.S. common stocks) correlates 0.998 with VTI; cumulative return 7.3% against 8.4%.
+- **Truncation test.** The features are recomputed with all data after a cutoff date removed. Everything up to the cutoff is identical (0 mismatches in 38,555 rows), while a deliberately leaky feature is detected, so the test can see leakage.
+- On this pipeline's calls the day-0 rank R² is 4.8% with Compustat returns and 4.7% with CRSP (section 6).
+
+Limits: the panel ends 2026-01-30, so 12-week windows exist only for early reporters (section 6). It is licensed data and stays outside the repo. The cleaning notebooks are not in the repo yet.
+
+### 7.3 Fama-French 12 industries
+
+`src/llm_based_earnings_surprise_ntam/signals/ff12.py` maps a SIC code to one of Kenneth French's 12 industries (NoDur, Durbl, Manuf, Enrgy, Chems, BusEq, Telcm, Utils, Shops, Hlth, Money, Other). The paper reports its sample by this classification (Table 1). It is the first step of the industry adjustment that section 6 lists as missing.
+
+```python
+from llm_based_earnings_surprise_ntam.signals.ff12 import ff12_name
+df["industry"] = ff12_name(df["sic"])     # a missing or invalid SIC gives NaN
+```
+
+```bash
+uv run python -m llm_based_earnings_surprise_ntam.signals.ff12     # self-test: 20 spot checks, no overlapping ranges
+```
+
+- **The pipeline's final file has no SIC column.** It is available as `sic` in the Compustat panel above, or from Compustat by `gvkey`.
+- **SIC is the value at the download date**, not on each event date. That is fine for grouping, but it is not point-in-time.
+- The SIC ranges come from a public copy of French's definition file and were checked against a second public listing only for the first nine industries. Check Health and Money against French's website before relying on them for published results.
