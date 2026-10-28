@@ -347,7 +347,7 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
 
 - **One quarter:** 59 event dates, with 86% of events in four weeks. Overlapping windows make the 4- and 12-week t-statistics optimistic. More quarters and calendar-time portfolios fix both.
 - **12 weeks covers only early reporters** (up to Nov 3), which are bigger (median price $44 vs $15).
-- **Market-adjusted only:** no industry, size or characteristic adjustment yet. A SIC-to-Fama-French-12 mapping for the industry step is in [section 7.3](#73-fama-french-12-industries).
+- **Market-adjusted only:** no size or characteristic adjustment yet. [Section 7.4](#74-is-the-stage-gate-1-spread-an-industry-bet) redoes the test industry-neutral, using the mapping in [section 7.3](#73-fama-french-12-industries).
 - **Gross returns:** no commissions, spreads, borrow fees or market impact, and every trade fills at the day-0 close. Break-even is about **0.27% per trade** for all events (the 1.1% one-week spread over four trades: buy, sell, short, cover) and about **0.6%** for large caps. Costs and a realistic simulation are stage gate 2.
 - **Compustat, not CRSP:** no dividend factor for about 40% of stocks (price return only). On day 0 the sources agree: on this pipeline's calls the rank R² is 4.8% with Compustat and 4.7% with CRSP (step 6).
 - **No value weights:** Compustat's market cap is wrong for some ADRs (LATAM comes out at about $27 trillion: the local share count times the ADR price), so size cuts use US-incorporated firms.
