@@ -3,12 +3,15 @@
 Runs on Hazel's cleaned files (events_baseline.parquet, prices_clean.parquet, market_ret.parquet), which are
 licensed WRDS data and stay outside this public repo. From the repo root:
 
-    uv run python scripts/long_short_q4_2025.py ../data/processed ../meetings/2026-10-28_week2
+    uv run python scripts/long_short_q4_2025.py ../data/processed ../meetings/2026-10-28_week2 \
+        --pipeline data/processed/earnings_calls_ibes_20251001_20251231_us.parquet
 
-Writes to the output folder:
+`--pipeline` (optional) adds the same test on the pipeline's in-sample calls, the calls the LLM scores, with the
+pipeline's analyst-level SUE as the signal. Writes to the output folder:
     long_short_results.csv     main table plus robustness checks (one row per check and window)
     long_short_large_cap_stress.csv   is the large-cap 1-week spread carried by a few names or one week?
     long_short_path.csv        the charts' numbers: cumulative spread and standard error by day
+    long_short_chart_all.png   slide chart: all events, days 0-20
     long_short_chart.png       slide chart: all events vs large caps, days 0-20
     long_short_chart_12w.png   backup chart: companies that reported by Nov 3, days 0-60
 
@@ -56,6 +59,25 @@ def load(folder):
     ev['us'] = ev.fic.eq('USA')
     ev['large'] = ev.us & (ev.mcap_lag1 >= LARGE)
     return ev, returns, market
+
+
+def load_pipeline(path, ev_hazel, px_path):
+    """The pipeline's in-sample calls (the calls the LLM scores), keyed to the primary Compustat line on the
+    event date so they can use the same daily returns. Signal: the pipeline's SUE (analyst-level consensus)."""
+    cols = ['keydevid', 'gvkey', 'event_date', 'sue', 'in_sample']
+    d = pd.read_parquet(path, columns=cols)
+    d = d[d.in_sample.fillna(False).astype(bool)].copy()
+    d['gvkey'] = d.gvkey.astype(str).str.zfill(6)
+    d['event_date'] = pd.to_datetime(d.event_date)
+    px = pd.read_parquet(px_path, columns=['gvkey', 'iid', 'datadate', 'primary_pit', 'mcap_lag1', 'fic'])
+    px = px[px.primary_pit.fillna(False).astype(bool)].copy()
+    px['key'] = px.gvkey.astype(str) + '|' + px.iid.astype(str)  # same key as the return panel in load()
+    px['gvkey'] = px.gvkey.astype(str).str.zfill(6)
+    px['datadate'] = pd.to_datetime(px.datadate)
+    d = d.merge(px.drop(columns='iid').rename(columns={'datadate': 'event_date'}), on=['gvkey', 'event_date'],
+                how='inner')
+    d['large'] = d.fic.eq('USA') & (d.mcap_lag1 >= LARGE)
+    return d.drop_duplicates('keydevid').reset_index(drop=True)
 
 
 def run_checks(ev, stock, mkt):
@@ -150,7 +172,7 @@ def plot(lines, title, subtitle, xmax, xticks, notes, out_png):
     fitted_text(fig, left, 0.935, title, 14, fontweight='bold', color=INK)
     fitted_text(fig, left, 0.885, subtitle, 11.5, color=INK2)
     x = left
-    for _, color, label, _ in lines:
+    for _, color, label, _ in (lines if len(lines) > 1 else []):  # one series: the title names it
         fig.lines.append(plt.Line2D([x, x + 0.035], [0.828, 0.828], transform=fig.transFigure, color=color,
                                     linewidth=2.5, solid_capstyle='round'))
         t = fig.text(x + 0.047, 0.828, label, fontsize=10.5, color=INK, va='center')
@@ -166,6 +188,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('data_dir', help="folder with Hazel's events_baseline / prices_clean / market_ret parquet")
     parser.add_argument('out_dir', help='where to write the results, the charts and their data')
+    parser.add_argument('--pipeline', help="also run on the pipeline's in-sample calls (final parquet from doit)")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding='utf-8')
     out = Path(args.out_dir)
@@ -179,6 +202,14 @@ def main():
           f"{int(filled[:, 1:].sum()):,} missing daily returns inside windows set to the market")
 
     res = run_checks(ev, stock, mkt)
+    if args.pipeline:
+        pl = load_pipeline(args.pipeline, ev, Path(args.data_dir) / 'prices_clean.parquet')
+        s_pl, m_pl, _ = event_paths(pl.key, pl.event_date, returns, market, horizon=60)
+        print(f'pipeline: {len(pl):,} in-sample calls keyed to Compustat ({int(pl.large.sum()):,} US large caps)')
+        res = pd.concat([res] + [
+            long_short(s_pl, m_pl, quantile(pl.sue.where(mask)), pl.event_date, signal=pl.sue).assign(check=label)
+            for label, mask in [('pipeline calls with transcripts (analyst-level SUE)', pl.sue.notna()),
+                                ('pipeline calls, US large caps', pl.large)]], ignore_index=True)
     res.to_csv(out / 'long_short_results.csv', index=False)
     stress = stress_test(ev, stock, mkt, ev.large)
     stress.to_csv(out / 'long_short_large_cap_stress.csv', index=False)
@@ -198,6 +229,14 @@ def main():
     pd.concat([p.assign(sample=k) for k, p in paths.items()]).to_csv(out / 'long_short_path.csv', index=False)
 
     n_large = int(ev.large.sum())
+    plot([(paths['all events, days 0-20'], BLUE, f'All {len(ev):,} events', {5: 9, 20: 9})],
+         'After day 0, about 1% more in week one, then flat',
+         f'All {len(ev):,} events: top fifth minus bottom fifth by surprise, vs VTI',
+         20, {0: '0', 5: '1 wk', 10: '2 wk', 15: '3 wk', 20: '4 wk'},
+         ['Shaded: 95% band, clustered by event date. Day 0 (not tradable): '
+          f"{pct(100 * get('main', 'day 0'))}.", "Source: I/B/E/S and Compustat daily via WRDS (Hazel's cleaned "
+                                                  'Q4 2025 files).'],
+         out / 'long_short_chart_all.png')
     plot([(paths['all events, days 0-20'], BLUE, f'All {len(ev):,} events', {5: -9, 20: -9}),
           (paths['US large caps, days 0-20'], ORANGE, f'{n_large} large caps (US, ≥ $10bn)', {5: 9, 20: 9})],
          'After day 0: about 1% overall, 2–2.5% in large caps',
@@ -227,7 +266,7 @@ def main():
     print('\nUS large caps, 1-week spread stress test:')
     print(stress.assign(spread_bp=(1e4 * stress.spread).round(0))[['test', 'spread_bp']].to_string(index=False))
     print(f'\nwrote {out / "long_short_results.csv"}, long_short_large_cap_stress.csv, long_short_path.csv, '
-          'long_short_chart.png, long_short_chart_12w.png')
+          'long_short_chart_all.png, long_short_chart.png, long_short_chart_12w.png')
 
 
 if __name__ == '__main__':
