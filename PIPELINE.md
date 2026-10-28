@@ -429,3 +429,35 @@ uv run python -m llm_based_earnings_surprise_ntam.signals.ff12     # self-test: 
 - **The pipeline's final file has no SIC column.** It is available as `sic` in the Compustat panel above, or from Compustat by `gvkey`.
 - **SIC is the value at the download date**, not on each event date. That is fine for grouping, but it is not point-in-time.
 - The SIC ranges come from a public copy of French's definition file and were checked against a second public listing only for the first nine industries. Check Health and Money against French's website before relying on them for published results.
+
+### 7.4 Is the stage gate 1 spread an industry bet?
+
+Section 6 sorts every event into one pool, so a leg can end up overweight one industry. It is: Health is 35.9% of the top fifth and 25.3% of the bottom, against 19.5% of all events. This check repeats the test two more ways, using the industries of section 7.3.
+
+| Variant | Fifths formed | Return measured against |
+|---|---|---|
+| As in section 6 | one pool | VTI |
+| Industry-neutral | inside each industry, legs pooled afterwards | VTI |
+| Industry-adjusted | one pool | the industry's own equal-weighted return |
+
+Top fifth minus bottom fifth after the day-0 close, % (t-statistic):
+
+| Variant | All events, 1 week | All events, 4 weeks | US large caps, 1 week | US large caps, 4 weeks |
+|---|---|---|---|---|
+| As in section 6 | +1.1 (2.0) | +1.0 (0.9) | **+2.4 (5.2)** | +2.2 (2.4) |
+| Industry-neutral | +0.6 (1.8) | +0.5 (0.6) | **+2.7 (3.5)** | +2.8 (1.8) |
+| Industry-adjusted | +1.1 (1.8) | +1.3 (0.9) | **+2.5 (5.7)** | +1.7 (1.6) |
+
+- **The large-cap spread is not an industry bet.** One week survives both variants (+2.7% and +2.5% against +2.4%).
+- **Part of the all-events spread is.** Sorting inside industries halves one week, from +1.1% to +0.6%.
+- **Day 0 is unchanged** by either variant: the surprise-only rank R² is 5.7%, 5.6% and 5.5%. This matches the paper's remark that the earnings surprise explains returns about equally well across industries.
+
+The paper reports industry heterogeneity in how well an LLM explains same-day returns and forms no portfolios, so these numbers have no counterpart in it.
+
+```bash
+uv run python scripts/industry_neutral_long_short.py <folder with the cleaned files> out
+```
+
+Also writes `industry_neutral_results.csv` (every variant and window) and `industry_concentration.csv` (each industry's share of each leg).
+
+**Limits**, on top of section 6's (one quarter, gross returns, no size or characteristic adjustment): the industry-neutral variant drops industries with too few events (303 of 3,632 events for all events; the threshold is a command-line option), so its sample is not identical to the other two rows. 12-week windows are left out: with 60 trading days of prices only for early reporters, the industry-neutral legs fall to about 60 events a side. The industry benchmark is the equal-weighted return of the panel's investable US common stocks in that industry, which the script checks against VTI (its daily mean is within 0.1pp), because the raw panel includes placeholder prices that make the mean meaningless. SIC is the value at the download date, as in section 7.3.
