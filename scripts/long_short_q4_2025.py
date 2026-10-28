@@ -11,8 +11,8 @@ pipeline's analyst-level SUE as the signal. Writes to the output folder:
     long_short_results.csv     main table plus robustness checks (one row per check and window)
     long_short_large_cap_stress.csv   is the large-cap 1-week spread carried by a few names or one week?
     long_short_path.csv        the charts' numbers: cumulative spread and standard error by day
-    long_short_chart_all.png   slide chart: all events, days 0-20
-    long_short_chart.png       slide chart: all events vs large caps, days 0-20
+    long_short_chart_all.png   chart: all events, days 0-20
+    long_short_chart.png       chart: all events vs large caps, days 0-20 (PIPELINE.md, section 6)
     long_short_chart_12w.png   backup chart: companies that reported by Nov 3, days 0-60
 
 Signal: the surprise as a percent of the pre-announcement price, sorted into fifths within the sample. Returns:

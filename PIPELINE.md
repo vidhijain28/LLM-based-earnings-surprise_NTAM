@@ -271,3 +271,97 @@ The slope is within 0.002 of the paper's 0.219 and the R² within 0.3pp of its 5
 - **One-day window only.** The project's longer horizons (1, 4, 12 weeks) would need cumulative returns, which these tasks do not compute.
 - **VTI is an ETF, not an index.** Its return includes a tracking difference and its own dividend timing. The effect on a one-day market-adjusted return is small, but it is not identical to a value-weighted market return.
 - **The `price` column is still the t−1 close** used for the SUE; the event-day close is not stored as a column, only used inside the cross-check.
+
+---
+
+## 6. Stage gate 1: the surprise as a long-short at 1, 4 and 12 weeks
+
+Section 5 checks the surprise on the event day only ("one-day window only"). NTAM's stage gate 1 asks for "long short results with a focus on cumulative abnormal returns over 1 week, 4 week, 12 week horizons". This section runs that test on the plain earnings surprise, before any LLM signal: a post-earnings-announcement drift (PEAD) test of how much of the surprise is still tradable after the event day. That is the bar an LLM long-short has to clear.
+
+**Result (Q4 2025):** most of the surprise is priced on the event day. After the day-0 close, the top fifth beats the bottom fifth by about **1% in the first week**, then nothing measurable. **US large caps are the exception: +2.4% in week one (t 5.2), still +2.2% at four weeks.** It is one quarter, so interesting, not proven.
+
+The method is in `src/llm_based_earnings_surprise_ntam/signals/long_short.py` (it takes any signal that ranks events), and this run is `scripts/long_short_q4_2025.py`. It is a script, not a `doit` task yet.
+
+### How to run it
+
+```bash
+uv run doit                                    # the pipeline (needed for --pipeline)
+uv run python scripts/long_short_q4_2025.py ../data/processed <output folder> \
+    --pipeline data/processed/earnings_calls_ibes_20251001_20251231_us.parquet
+```
+
+The first argument is the folder with Hazel's cleaned Q4 2025 files (`events_baseline.parquet`, `prices_clean.parquet`, `market_ret.parquet`). They are licensed WRDS data, so they stay outside the repo. `--pipeline` adds the same test on this pipeline's `in_sample` calls. A run takes about a minute and writes `long_short_results.csv` (one row per check and window), `long_short_large_cap_stress.csv`, `long_short_path.csv` (the charts' numbers) and the charts.
+
+### The trade
+
+<img src="docs/long_short/trade_timeline.png" width="520" alt="The trade in trading days: the day −1 close scales the surprise; day 0 is the reaction, not traded; enter at the day-0 close; CARs to days 5, 20 and 60">
+
+| Decision | What we do | Why |
+|---|---|---|
+| Events | **3,632** Q4 2025 I/B/E/S announcements with Compustat daily prices (Hazel's cleaned files). Check: this pipeline's **2,585** `in_sample` calls, on the same prices | CRSP daily v2 ends 2025-12-31 (section 5), too early for 4- and 12-week windows on Q4 events. Compustat runs to 2026-01-30. |
+| Signal | **Surprise ÷ the close before the event date**, sorted into **fifths within the quarter**. Hazel's surprise uses the mean of the last monthly I/B/E/S consensus before the release; the pipeline check uses `sue` (analyst-level consensus, step 2) | The paper's surprise. Two consensus rules, so the check also tests the consensus. |
+| Portfolio | **Long the top fifth, short the bottom fifth, equal-weighted**: 727 names per side | Value weights are unreliable in this file (see the limitations). |
+| Entry | **The close of `event_date` (day 0)** | The day-0 reaction comes before a signal built on the release can trade, so it is reported but not traded. 90% of transcripts exist by 16:00 ET on the event date (step 4), so an LLM signal can trade at the same close. |
+| Return | Daily stock return **minus VTI**, summed over days 1–5, 1–20 and 1–60: the **CAR** at 1, 4 and 12 weeks. Buy-and-hold as a check | The market adjustment of step 5, over the brief's horizons. |
+| Missing daily returns | Set to VTI's return (no abnormal return that day) | 1,182 of about 202,000 daily returns inside the windows. |
+| Outliers | Window returns winsorized at 1% and 99% | Compustat has some bad daily prints (57 daily moves beyond ±50%). |
+| t-statistics | Window return regressed on a top-fifth dummy (top and bottom fifths only), **standard errors clustered by event date** (59 dates) | Events on the same day share market and industry shocks. |
+
+### Results (Q4 2025)
+
+<img src="docs/long_short/long_short_chart.png" width="600" alt="Top-minus-bottom-fifth CAR after the day-0 close: about 1% for all events, 2 to 2.5% for US large caps">
+
+Top fifth minus bottom fifth, abnormal return vs VTI, % (t-statistic):
+
+| Window | All events (3,632) | US large caps (630) | Pipeline calls (2,585) | Pipeline large caps (600) |
+|---|---|---|---|---|
+| Day 0 (reaction, not traded) | +5.7 (12.0) | +4.6 (5.7) | +5.7 (7.8) | +3.8 (3.7) |
+| **1 week** (days 1–5) | **+1.1 (2.0)** | **+2.4 (5.2)** | **+1.5 (2.4)** | **+3.2 (8.9)** |
+| 4 weeks (days 1–20) | +1.0 (0.9) | +2.2 (2.4) | +0.8 (0.7) | +3.3 (3.5) |
+| 12 weeks (days 1–60)\* | +1.0 (0.3) | +4.3 (1.6) | +3.9 (1.7) | +6.0 (2.4) |
+
+Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each sample is sorted into its own fifths. \*Only events up to 2025-11-03 have 60 trading days of prices (1,339 / 374 / 1,011 / 358 events): [12-week chart](docs/long_short/long_short_chart_12w.png).
+
+- **Most of it is priced on day 0.** The surprise explains 5.7% of day-0 returns but 0.3% of week one (rank R², the regression of step 6). The week-one gain builds over days 2–5 (+1.0%), not on day 1 (+0.1%).
+- **Large caps drift more, and for longer**, on both datasets. It is not a few names: dropping the 10 best and 10 worst per side still gives +2.3%, the median spread is +2.05%, and it is positive in each of the four busiest reporting weeks (+2.1%, +2.1%, +2.8%, +2.9%). It is a top-end effect: +1.2% for all US-incorporated firms, +1.1% at $2bn and up, +2.4% at $10bn and up.
+- **Why we don't believe it yet:** the literature says large-cap drift is gone. [Martineau (2022)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3111607), "Rest in Peace Post-Earnings Announcement Drift", finds none in large caps since 2006: prices react fully on the announcement day. One quarter could be sector or factor exposure, so it needs industry adjustment and more quarters.
+
+### Robustness
+
+| Check: top − bottom fifth, % (t) | 1 week | 4 weeks |
+|---|---|---|
+| Main: all 3,632 events | +1.1 (2.0) | +1.0 (0.9) |
+| Fifths from earlier events only (3,237) | +1.2 (2.4) | +1.1 (1.2) |
+| Buy-and-hold returns | +1.1 (2.0) | +0.9 (0.7) |
+| No winsorizing | +1.1 (2.0) | +0.8 (0.5) |
+| Clustered by reporting week | +1.1 (2.2) | +1.0 (0.6) |
+| Deciles: top − bottom tenth | +1.1 (2.0) | +2.0 (1.3) |
+| Price ≥ $5 (3,022) | +1.1 (1.8) | +0.9 (1.1) |
+| 2+ analysts (3,201) | +1.3 (2.1) | +1.6 (1.5) |
+
+"Fifths from earlier events only" ranks each event against the surprises announced before it (from the 251st event on), which is what a live signal could do. Subsamples are re-sorted into fifths.
+
+### Known limitations
+
+- **One quarter:** 59 event dates, with 86% of events in four weeks. Overlapping windows make the 4- and 12-week t-statistics optimistic. More quarters and calendar-time portfolios fix both.
+- **12 weeks covers only early reporters** (up to Nov 3), which are bigger (median price $44 vs $15).
+- **Market-adjusted only:** no industry, size or characteristic adjustment yet.
+- **Gross returns:** no commissions, spreads, borrow fees or market impact, and every trade fills at the day-0 close. Break-even is about **0.27% per trade** for all events (the 1.1% one-week spread over four trades: buy, sell, short, cover) and about **0.6%** for large caps. Costs and a realistic simulation are stage gate 2.
+- **Compustat, not CRSP:** no dividend factor for about 40% of stocks (price return only). On day 0 the sources agree: on this pipeline's calls the rank R² is 4.8% with Compustat and 4.7% with CRSP (step 6).
+- **No value weights:** Compustat's market cap is wrong for some ADRs (LATAM comes out at about $27 trillion: the local share count times the ADR price), so size cuts use US-incorporated firms.
+- **Not a `doit` task yet:** it runs on Hazel's files. The next version runs on the CRSP returns of step 5.
+
+### What it means for the LLM signal
+
+- **The bar:** an LLM long-short has to beat about **1% at one week (2–3% in large caps)**, after controlling for the surprise.
+- **Same code, new signal:** the functions take any score that ranks events, so the LLM score from the LLM step ([LLM_README.md](LLM_README.md)) drops in directly, then a double sort on `sue`. The LLM step's incremental R² covers day 0; this covers 1, 4 and 12 weeks.
+
+  ```python
+  from llm_based_earnings_surprise_ntam.signals.long_short import event_paths, long_short, quantile
+  # returns: daily returns, one row per security and one column per trading day; market: VTI on the same days
+  stock, mkt, _ = event_paths(keys, event_dates, returns, market)     # days 0-60 after each event
+  long_short(stock, mkt, quantile(score), event_dates, signal=score)  # one row per window
+  ```
+
+- **Next:** CRSP for 2024–25 through this pipeline (about 8 quarters instead of 1), industry and characteristic adjustment, calendar-time portfolios. Then stage gate 2: costs, turnover, long-only.
+- **Open question for NTAM:** for stage gate 1, which matters more: one week in large caps, or 4–12 weeks?

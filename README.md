@@ -55,4 +55,4 @@ See **[LLM_README.md](LLM_README.md)** for the commands (pilot run, full run, te
 Long the top fifth and short the bottom fifth of announcements by surprise, entered at the day-0 close, with
 cumulative abnormal returns over 1, 4 and 12 weeks: the benchmark an LLM signal has to beat.
 
-See **[LONG_SHORT.md](LONG_SHORT.md)** for the results, the robustness checks and how to rerun them.
+See **[section 6 of PIPELINE.md](PIPELINE.md#6-stage-gate-1-the-surprise-as-a-long-short-at-1-4-and-12-weeks)** for the results, the robustness checks and how to rerun them.
