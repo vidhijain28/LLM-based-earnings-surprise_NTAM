@@ -276,7 +276,7 @@ The slope is within 0.002 of the paper's 0.219 and the R² within 0.3pp of its 5
 
 ## 6. Stage gate 1: the surprise as a long-short at 1, 4 and 12 weeks
 
-Section 5 checks the surprise on the event day only ("one-day window only"). NTAM's stage gate 1 asks for "long short results with a focus on cumulative abnormal returns over 1 week, 4 week, 12 week horizons". This section runs that test on the plain earnings surprise, before any LLM signal: a post-earnings-announcement drift (PEAD) test of how much of the surprise is still tradable after the event day. That is the bar an LLM long-short has to clear.
+Section 5 checks the surprise on the event day only ("one-day window only"). Stage gate 1 of our proposal asks for "long short results with a focus on cumulative abnormal returns over 1 week, 4 week, 12 week horizons". This section runs that test on the plain earnings surprise, before any LLM signal: a post-earnings-announcement drift (PEAD) test of how much of the surprise is still tradable after the event day. That is the bar an LLM long-short has to clear.
 
 **Result (Q4 2025):** most of the surprise is priced on the event day. After the day-0 close, the top fifth beats the bottom fifth by about **1% in the first week**, then nothing measurable. **US large caps are the exception: +2.4% in week one (t 5.2), still +2.2% at four weeks.** It is one quarter, so interesting, not proven.
 
@@ -364,4 +364,4 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
   ```
 
 - **Next:** CRSP for 2024–25 through this pipeline (about 8 quarters instead of 1), industry and characteristic adjustment, calendar-time portfolios. Then stage gate 2: costs, turnover, long-only.
-- **Open question for NTAM:** for stage gate 1, which matters more: one week in large caps, or 4–12 weeks?
+- **Open question:** for stage gate 1, should we focus on one week in large caps, or on 4–12 weeks?
