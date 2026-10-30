@@ -79,7 +79,43 @@ R² of the surprise alone, the LLM prediction alone, and both together.
 
 ---
 
-## 5. Outputs
+## 5. Anonymization
+
+Before the LLM sees a transcript, `anonymize()` in `llm/llm_common.py` hides who the call is about. This lowers the chance that
+the model recognizes the company and recalls how its stock moved (look-ahead bias). It runs on every source except
+`summary`, which is already written from anonymized text. The rules are in `llm/rp_anonymizer.py`:
+
+| What | Replaced with | How |
+|---|---|---|
+| Speaker names | `[EXECUTIVE 1]`, `[ANALYST 2]`, ... | Names from the `Name (Role):` lines, numbered in order of first appearance. The same label is used wherever the name appears, also mid-sentence. |
+| Speaker first / last names | the speaker's label | e.g. "Thanks, Maria" -> "Thanks, [EXECUTIVE 1]". Skips parts shorter than 4 letters and common words like "Mark" or "Will". |
+| Company name | `[COMPANY]` | Full legal name, plus the short name without "The" and suffixes (Inc., Corp., Holdings, ...). |
+| Ticker | `[TICKER]` | Whole-word matches only. |
+| Years (1900-2099) | `[YEAR]` | Done in `llm_common.py`. |
+
+Example:
+```text
+Before: Maria Lopez (Executive): At Example, revenue grew 5% and EXMP raised guidance for 2026.
+        John Smith (Analyst): Maria, how should we think about margins at Example Corp.?
+After:  [EXECUTIVE 1] (Executive): At [COMPANY], revenue grew 5% and [TICKER] raised guidance for [YEAR].
+        [ANALYST 1] (Analyst): [EXECUTIVE 1], how should we think about margins at [COMPANY]?
+```
+
+Limits:
+- Short company names that are also ordinary words (e.g. "Target", "Block") are replaced only when written
+  Capitalized or in UPPER CASE, so the lower-case word "target" stays.
+- Product names, brands and places are not removed, so a well-known company can still be recognizable.
+- Operator lines are kept as they are.
+
+To check one transcript yourself (`stats["leaks"]` counts names the rules missed, which should be close to 0):
+```python
+from llm_based_earnings_surprise_ntam.llm.rp_anonymizer import anonymize
+text_anon, stats = anonymize(text, company="Example Corp.", ticker="EXMP")
+```
+
+---
+
+## 6. Outputs
 
 Both files are in `data/processed/` (not tracked by git) and join to the pipeline dataset on `transcriptid`.
 
@@ -97,11 +133,12 @@ both = df.merge(scores[["transcriptid", "model", "source", "prediction", "reason
 
 ---
 
-## 6. Things to know
+## 7. Things to know
 
-- **Changed a prompt?** Delete the old output first, or calls already done are skipped and keep the old result:
-  `rm data/processed/llm_summaries.parquet` (or `llm_scores.parquet`).
-- **Text is anonymized** before the LLM sees it: speaker names, company name, ticker and years are replaced.
+- **Changed a prompt or the anonymizer?** Delete the old output first, or calls already done are skipped and keep
+  the old result: `rm data/processed/llm_summaries.parquet` (or `llm_scores.parquet`).
+- **Text is anonymized** before the LLM sees it: speaker names, company name, ticker and years are replaced
+  (see section 5).
 - **The data period follows `config.yaml`**, the same as the pipeline. Change the period there and rerun
   `uv run doit` first.
 - **`llm_eval` with very few calls** prints warnings and `nan` R². That is expected: a regression needs many calls.
