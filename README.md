@@ -49,3 +49,10 @@ Reads the final dataset above, has a local LLM (Ollama) summarize each call and 
 measures how much of the abnormal return the prediction explains beyond the surprise.
 
 See **[LLM_README.md](LLM_README.md)** for the commands (pilot run, full run, text sources) and the output files.
+
+## Stage gate 1: the surprise as a long-short
+
+Long the top fifth and short the bottom fifth of announcements by surprise, entered at the day-0 close, with
+cumulative abnormal returns over 1, 4 and 12 weeks: the benchmark an LLM signal has to beat.
+
+See **[section 6 of PIPELINE.md](PIPELINE.md#6-stage-gate-1-the-surprise-as-a-long-short-at-1-4-and-12-weeks)** for the results, the robustness checks and how to rerun them.
