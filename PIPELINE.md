@@ -280,7 +280,7 @@ An independent rebuild of this regression from Compustat prices and the monthly 
 
 Section 5 checks the surprise on the event day only ("one-day window only"). Stage gate 1 of our proposal asks for "long short results with a focus on cumulative abnormal returns over 1 week, 4 week, 12 week horizons". This section runs that test on the plain earnings surprise, before any LLM signal: a post-earnings-announcement drift (PEAD) test of how much of the surprise is still tradable after the event day. That is the bar an LLM long-short has to clear.
 
-**Result (Q4 2025):** most of the surprise is priced on the event day. After the day-0 close, the top fifth beats the bottom fifth by about **1% in the first week**, then nothing measurable, and nothing is left at 12 weeks. **US large caps are the exception: +2.4% in week one (t 5.2), +2.2% at four weeks and +5.0% at twelve (t 2.3).** It is one quarter, so interesting, not proven.
+**Result (Q4 2025):** most of the surprise is priced on the event day. After the day-0 close, the top fifth beats the bottom fifth by about **1% in the first week**, then nothing measurable. **US large caps are the exception: +2.4% in week one (t 5.2), still +2.2% at four weeks.** It is one quarter, so interesting, not proven.
 
 The method is in `src/llm_based_earnings_surprise_ntam/signals/long_short.py` (it takes any signal that ranks events), and this run is `scripts/long_short_q4_2025.py`. It is a script, not a `doit` task yet.
 
@@ -288,13 +288,11 @@ The method is in `src/llm_based_earnings_surprise_ntam/signals/long_short.py` (i
 
 ```bash
 uv run doit                                    # the pipeline (needed for --pipeline)
-uv run python scripts/extend_compustat_prices.py pull ../data/raw/comp_secd     # WRDS: Dec 2025 to Apr 2026
-uv run python scripts/extend_compustat_prices.py build ../data/processed ../data/raw/comp_secd ../data/processed_extended
-uv run python scripts/long_short_q4_2025.py ../data/processed_extended <output folder> \
+uv run python scripts/long_short_q4_2025.py ../data/processed <output folder> \
     --pipeline data/processed/earnings_calls_ibes_20251001_20251231_us.parquet
 ```
 
-The first argument is a folder with the cleaned Q4 2025 files (`events_baseline.parquet`, `prices_clean.parquet`, `market_ret.parquet`): Hazel's, copied by the two `extend_compustat_prices.py` steps with the prices extended from 2026-01-30 to 2026-04-30, so every event has 12 weeks. They are licensed WRDS data, so they stay outside the repo; how they are built and checked is in [section 7.2](#72-the-compustat-price-panel-behind-section-6). `--pipeline` adds the same test on this pipeline's `in_sample` calls. A run takes about a minute and writes `long_short_results.csv` (one row per check and window), `long_short_large_cap_stress.csv`, `long_short_path.csv` (the charts' numbers) and the charts.
+The first argument is the folder with Hazel's cleaned Q4 2025 files (`events_baseline.parquet`, `prices_clean.parquet`, `market_ret.parquet`). They are licensed WRDS data, so they stay outside the repo; how they are built and checked is in [section 7.2](#72-the-compustat-price-panel-behind-section-6). `--pipeline` adds the same test on this pipeline's `in_sample` calls. A run takes about a minute and writes `long_short_results.csv` (one row per check and window), `long_short_large_cap_stress.csv`, `long_short_path.csv` (the charts' numbers) and the charts.
 
 ### The trade
 
@@ -302,13 +300,13 @@ The first argument is a folder with the cleaned Q4 2025 files (`events_baseline.
 
 | Decision | What we do | Why |
 |---|---|---|
-| Events | **3,632** Q4 2025 I/B/E/S announcements with Compustat daily prices (Hazel's cleaned files). Check: this pipeline's **2,585** `in_sample` calls, on the same prices | CRSP daily v2 ends 2025-12-31 (section 5), too early for 4- and 12-week windows on Q4 events. The Compustat panel runs to 2026-04-30 (section 7.2), past the last event's 12 weeks. |
+| Events | **3,632** Q4 2025 I/B/E/S announcements with Compustat daily prices (Hazel's cleaned files). Check: this pipeline's **2,585** `in_sample` calls, on the same prices | CRSP daily v2 ends 2025-12-31 (section 5), too early for 4- and 12-week windows on Q4 events. Compustat runs to 2026-01-30. |
 | Signal | **Surprise ÷ the close before the event date**, sorted into **fifths within the quarter**. Hazel's surprise uses the mean of the last monthly I/B/E/S consensus before the release; the pipeline check uses `sue` (analyst-level consensus, step 2) | The paper's surprise. Two consensus rules, so the check also tests the consensus. |
 | Portfolio | **Long the top fifth, short the bottom fifth, equal-weighted**: 727 names per side | Value weights are unreliable in this file (see the limitations). |
 | Entry | **The close of `event_date` (day 0)** | The day-0 reaction comes before a signal built on the release can trade, so it is reported but not traded. 90% of transcripts exist by 16:00 ET on the event date (step 4), so an LLM signal can trade at the same close. |
 | Return | Daily stock return **minus VTI**, summed over days 1–5, 1–20 and 1–60: the **CAR** at 1, 4 and 12 weeks. Buy-and-hold as a check | The market adjustment of step 5, over the brief's horizons. |
-| Missing daily returns | Set to VTI's return (no abnormal return that day) | 1,401 of 217,920 daily returns inside the windows. |
-| Outliers | Window returns winsorized at 1% and 99% | Compustat has some bad daily prints (64 daily moves beyond ±50%). |
+| Missing daily returns | Set to VTI's return (no abnormal return that day) | 1,182 of about 202,000 daily returns inside the windows. |
+| Outliers | Window returns winsorized at 1% and 99% | Compustat has some bad daily prints (57 daily moves beyond ±50%). |
 | t-statistics | Window return regressed on a top-fifth dummy (top and bottom fifths only), **standard errors clustered by event date** (59 dates) | Events on the same day share market and industry shocks. |
 
 ### Results (Q4 2025)
@@ -322,13 +320,12 @@ Top fifth minus bottom fifth, abnormal return vs VTI, % (t-statistic):
 | Day 0 (reaction, not traded) | +5.7 (12.0) | +4.6 (5.7) | +5.7 (7.8) | +3.8 (3.7) |
 | **1 week** (days 1–5) | **+1.1 (2.0)** | **+2.4 (5.2)** | **+1.5 (2.4)** | **+3.2 (8.9)** |
 | 4 weeks (days 1–20) | +1.0 (0.9) | +2.2 (2.4) | +0.8 (0.7) | +3.3 (3.5) |
-| 12 weeks (days 1–60) | −0.3 (−0.2) | +5.0 (2.3) | +0.3 (0.2) | +7.4 (3.7) |
+| 12 weeks (days 1–60)\* | +1.0 (0.3) | +4.3 (1.6) | +3.9 (1.7) | +6.0 (2.4) |
 
-Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each sample is sorted into its own fifths. Every event has 60 trading days of prices: [12-week chart](docs/long_short/long_short_chart_12w.png).
+Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each sample is sorted into its own fifths. \*Only events up to 2025-11-03 have 60 trading days of prices (1,339 / 374 / 1,011 / 358 events): [12-week chart](docs/long_short/long_short_chart_12w.png).
 
 - **Most of it is priced on day 0.** The surprise explains 5.7% of day-0 returns but 0.3% of week one (rank R², the regression of step 6). The week-one gain builds over days 2–5 (+1.0%), not on day 1 (+0.1%).
 - **Large caps drift more, and for longer**, on both datasets. It is not a few names: dropping the 10 best and 10 worst per side still gives +2.3%, the median spread is +2.05%, and it is positive in each of the four busiest reporting weeks (+2.1%, +2.1%, +2.8%, +2.9%). It is a top-end effect: +1.2% for all US-incorporated firms, +1.1% at $2bn and up, +2.4% at $10bn and up.
-- **At 12 weeks, only large caps are still drifting:** +5.0% (t 2.3, or 1.7 clustered by reporting week), up from +2.2% at four weeks. The median spread is +5.4%, and dropping the 10 best and 10 worst per side gives +5.3%, but it is positive in only three of the four busiest reporting weeks. It holds within industries: +6.4% with fifths formed inside industries and +4.8% against industry returns (section 7.4's script). Across all events, the week-one gain is gone (−0.3%).
 - **Why we don't believe it yet:** the literature says large-cap drift is gone. [Martineau (2022)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3111607), "Rest in Peace Post-Earnings Announcement Drift", finds none in large caps since 2006: prices react fully on the announcement day. It is not an industry bet ([section 7.4](#74-is-the-stage-gate-1-spread-an-industry-bet)), but one quarter could still be factor exposure, so it needs characteristic adjustment and more quarters.
 
 ### Robustness
@@ -348,8 +345,8 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
 
 ### Known limitations
 
-- **One quarter:** 59 event dates, with 86% of events in four weeks, so the 12-week windows all end between 2025-12-26 and 2026-03-30 and share those months' market moves. Overlapping windows make the 4- and 12-week t-statistics optimistic. More quarters and calendar-time portfolios fix both.
-- **No delisting returns:** Compustat has none, so the 52 events (one large cap) that stop trading before day 60 earn the market after their last price.
+- **One quarter:** 59 event dates, with 86% of events in four weeks. Overlapping windows make the 4- and 12-week t-statistics optimistic. More quarters and calendar-time portfolios fix both.
+- **12 weeks covers only early reporters** (up to Nov 3), which are bigger (median price $44 vs $15).
 - **Market-adjusted only:** no size or characteristic adjustment yet. [Section 7.4](#74-is-the-stage-gate-1-spread-an-industry-bet) redoes the test industry-neutral, using the mapping in [section 7.3](#73-fama-french-12-industries).
 - **Gross returns:** no commissions, spreads, borrow fees or market impact, and every trade fills at the day-0 close. Break-even is about **0.27% per trade** for all events (the 1.1% one-week spread over four trades: buy, sell, short, cover) and about **0.6%** for large caps. Costs and a realistic simulation are stage gate 2.
 - **Compustat, not CRSP:** no dividend factor for about 40% of stocks (price return only). On day 0 the sources agree: on this pipeline's calls the rank R² is 4.8% with Compustat and 4.7% with CRSP (step 6).
@@ -358,7 +355,7 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
 
 ### What it means for the LLM signal
 
-- **The bar:** an LLM long-short has to beat about **1% at one week (2–3% in large caps)** and, at 12 weeks, nothing overall but about 5% in large caps, after controlling for the surprise.
+- **The bar:** an LLM long-short has to beat about **1% at one week (2–3% in large caps)**, after controlling for the surprise.
 - **Same code, new signal:** the functions take any score that ranks events, so the LLM score from the LLM step ([LLM_README.md](LLM_README.md)) drops in directly, then a double sort on `sue`. The LLM step's incremental R² covers day 0; this covers 1, 4 and 12 weeks.
 
   ```python
@@ -414,12 +411,7 @@ Checks:
 - **Truncation test.** The features are recomputed with all data after a cutoff date removed. Everything up to the cutoff is identical (0 mismatches in 38,555 rows), while a deliberately leaky feature is detected, so the test can see leakage.
 - On this pipeline's calls the day-0 rank R² is 4.8% with Compustat returns and 4.7% with CRSP (section 6).
 
-**Extended to 2026-04-30.** Section 6's 12-week windows need prices to 2026-03-30 for the last events. `scripts/extend_compustat_prices.py` downloads the same Compustat file from WRDS for 2025-12-01 to 2026-04-30 (`pull`), applies the rules above and appends the 62 trading days after 2026-01-30 to a copy of the panel (`build`): 2.87M rows over 167 trading days, with every earlier row unchanged. Checks:
-- **The rules reproduce this panel.** Rebuilt from its own prices, every derived column (returns, return source, lags, dollar volume, market cap, primary security) matches on all 1.79M rows.
-- **The two downloads agree** on the 41 trading days both cover (Dec 2 to Jan 30): the same calendar and rows (the new download has 414 more), identical VTI returns, and only 4 of 705,507 daily returns differ by more than 0.0001%. Split factors restated since the first export change no return, because no return mixes the two downloads.
-- **Truncation test** as above, at 2026-03-18: nothing up to the cutoff changes (0 mismatches in 553,776 rows), and the leaky control is caught.
-
-Limits: Compustat has no delisting returns (52 events stop trading inside their 12 weeks; section 6). It is licensed data and stays outside the repo. The cleaning notebooks are not in the repo yet.
+Limits: the panel ends 2026-01-30, so 12-week windows exist only for early reporters (section 6). It is licensed data and stays outside the repo. The cleaning notebooks are not in the repo yet.
 
 ### 7.3 Fama-French 12 industries
 
