@@ -59,7 +59,7 @@ summarize run takes roughly a day. You can stop with Ctrl+C at any time and reru
 calls already saved (it saves every 10 calls).
 
 **Or let `doit` do it.** `uv run doit` runs the pipeline, then `llm_summarize`, `llm_score`, `llm_merge`,
-`llm_eval` and the long-short backtest (PIPELINE.md section 6) with the model and source in `config.yaml`. The LLM
+and `llm_eval` with the model and source in `config.yaml`. The LLM
 tasks only send calls that are not done yet, so once everything is scored the whole run takes seconds and needs no
 Ollama. `doit clean` never deletes the summaries or scores.
 

@@ -1,4 +1,4 @@
-"""doit pipeline: CIQ earnings-call transcripts -> IBES surprises -> merged dataset -> LLM scores -> backtest.
+"""doit pipeline: CIQ earnings-call transcripts -> IBES surprises -> merged dataset -> LLM scores.
 
     uv run doit                                        # period and universe from config.yaml
     uv run doit start=2024-01-01 end=2024-12-31        # override the period
@@ -20,12 +20,9 @@ Tasks (each reruns only when its inputs or the relevant config section change):
     llm_score             score each call 0-1 (model and text source from config `llm`)               } calls not done
     llm_merge             final parquet + summaries + scores -> llm_merged_<tag>.parquet
     llm_eval              day-0 R²: surprise only, LLM only, both -> llm_eval_<tag>.txt
-    daily_returns         daily returns, days 0-60 after each call (Compustat daily, VTI)
-    backtest              SUE vs LLM long-short at 1, 4, 12 weeks + double-sort regression -> backtest_<tag>/
-`uv run doit` runs everything (default tasks: llm_eval, backtest). The LLM tasks call Ollama only for calls not yet
+`uv run doit` runs everything (default tasks: llm_merge, llm_eval). The LLM tasks call Ollama only for calls not yet
 in data/processed/llm_summaries.parquet / llm_scores.parquet; when all are done they take seconds and need no
-Ollama. Those two files are never removed by `doit clean` (hours of compute). Compustat daily keeps growing, so
-for a recent quarter refresh the prices with `uv run doit forget daily_returns && uv run doit`.
+Ollama. Those two files are never removed by `doit clean` (hours of compute).
 Monthly transcript files are reused across runs; to refresh a month that was still incomplete when pulled:
     uv run doit forget transcripts:2025-12 && uv run doit
 """
@@ -35,23 +32,19 @@ from doit import get_var
 from doit.tools import config_changed
 
 from llm_based_earnings_surprise_ntam.llm import llm_eval, llm_merge, llm_score, llm_summarize
-from llm_based_earnings_surprise_ntam.pipeline import (daily_returns, ibes, links, merge, prices, returns, sample,
-                                                       transcripts)
+from llm_based_earnings_surprise_ntam.pipeline import ibes, links, merge, prices, returns, sample, transcripts
 from llm_based_earnings_surprise_ntam.pipeline.config import load_config, path, paths
-from llm_based_earnings_surprise_ntam.signals import llm_backtest
 
-DOIT_CONFIG = {'default_tasks': ['llm_eval', 'backtest'], 'verbosity': 2, 'dep_file': '.doit.db'}
+DOIT_CONFIG = {'default_tasks': ['llm_merge', 'llm_eval'], 'verbosity': 2, 'dep_file': '.doit.db'}
 
 CFG = load_config(get_var('config', 'config.yaml'), start=get_var('start', None), end=get_var('end', None),
                   universe=get_var('universe', None))
 P = paths(CFG)
 P['returns'] = path(CFG, 'interim', f"returns_{CFG['tag']}.parquet")
-P['daily_returns'] = path(CFG, 'interim', f"daily_returns_{CFG['tag']}.parquet")
 P['summaries'] = path(CFG, 'processed', 'llm_summaries.parquet')  # all periods in one file, keyed by transcriptid
 P['scores'] = path(CFG, 'processed', 'llm_scores.parquet')        # ... by transcriptid x model x source
 P['llm_merged'] = path(CFG, 'processed', f"llm_merged_{CFG['tag']}.parquet")
 P['llm_eval'] = path(CFG, 'processed', f"llm_eval_{CFG['tag']}.txt")
-P['backtest'] = path(CFG, 'processed', f"backtest_{CFG['tag']}")
 LLM = {'model': 'qwen3:8b', 'source': 'summary', **(CFG.get('llm') or {})}
 
 
@@ -196,27 +189,5 @@ def task_llm_eval():
         'actions': [(llm_eval.evaluate, [P['final'], P['scores'], P['llm_eval']])],
         'file_dep': [P['final'], P['scores']],
         'targets': [P['llm_eval']],
-        'clean': True,
-    }
-
-
-def task_daily_returns():
-    """Daily returns for days 0-60 after each in-sample call (Compustat daily, primary US issue, VTI)."""
-    return {
-        'actions': [(daily_returns.pull, [CFG, P['final'], P['daily_returns']])],
-        'file_dep': [P['final']],
-        'task_dep': ['sample'],
-        'targets': [P['daily_returns']],
-        'clean': True,
-    }
-
-
-def task_backtest():
-    """SUE vs LLM score as long-short signals at 1, 4 and 12 weeks, and the regression on both."""
-    out = P['backtest']
-    return {
-        'actions': [(llm_backtest.run, [P['llm_merged'], P['daily_returns'], out])],
-        'file_dep': [P['llm_merged'], P['daily_returns']],
-        'targets': [out / f for f in ('long_short.csv', 'regression.csv', 'spread_path.csv', 'summary.md')],
         'clean': True,
     }
