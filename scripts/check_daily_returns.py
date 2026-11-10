@@ -53,10 +53,17 @@ def main(final_path, daily_path):
     print(f'   {flag(off == 0)} rows on days VTI did not trade: {off}')
     iids = d[~d.is_market].groupby('gvkey').iid.nunique()
     print(f'   {flag((iids == 1).all())} companies with more than one share class: {int((iids > 1).sum())}')
+    tick = ev.drop_duplicates('gvkey').set_index('gvkey').ticker
+    d = d.sort_values(['gvkey', 'iid', 'date'])
+    d['next_ret'] = d.groupby(['gvkey', 'iid']).ret.shift(-1)
     big = d.loc[~d.is_market & (d.ret.abs() > 0.5)]
-    print(f'   {flag(len(big) < 100)} daily moves beyond +/-50% (section 6 found 57 in a larger panel): {len(big)}')
-    for r in big.reindex(big.ret.abs().sort_values(ascending=False).index).head(5).itertuples():
-        print(f'          gvkey {r.gvkey} {r.date.date()} {r.ret:+.1%}')
+    two_day = (1 + big.ret) * (1 + big.next_ret.fillna(0)) - 1
+    back = big[two_day.abs() < 0.5 * big.ret.abs()]  # most of the move undone the next day
+    print(f'   {flag(len(big) < 100)} daily moves beyond +/-50% (section 6 found 57 in a larger panel): {len(big)}, '
+          f'of which {len(back)} reverse most of the move the next day (likely bad prices)')
+    for r in big.reindex(big.ret.abs().sort_values(ascending=False).index).head(10).itertuples():
+        print(f'          {str(tick.get(r.gvkey, "?")):6s} gvkey {r.gvkey} {r.date.date()} {r.ret:+8.1%}   '
+              f'next day {r.next_ret:+8.1%}')
 
     # 2. coverage ---------------------------------------------------------------------------------------------
     print('\n2. COVERAGE')
@@ -90,11 +97,19 @@ def main(final_path, daily_path):
     c = pd.DataFrame({'ticker': ok.ticker.to_numpy(), 'date': ok.event_date.dt.date.to_numpy(),
                       'compustat': comp0, 'crsp': ok.ret.to_numpy(dtype=float)}).dropna()
     diff = (c.compustat - c.crsp).abs()
+    exact = (diff < 1e-9).mean()
     print(f'   {flag(c.compustat.corr(c.crsp) > 0.98)} stock day-0 returns: {len(c):,} pairs, correlation '
-          f'{c.compustat.corr(c.crsp):.4f}, median gap {diff.median() * 1e4:.1f} bp, '
-          f'within 0.1 pp: {(diff < 0.001).mean():.0%}, within 1 pp: {(diff < 0.01).mean():.0%}')
+          f'{c.compustat.corr(c.crsp):.6f}, within 0.1 pp: {(diff < 0.001).mean():.1%}, within 1 pp: '
+          f'{(diff < 0.01).mean():.1%}')
+    print(f'         gaps in bp: median {diff.median() * 1e4:.3f}, 99th pct {diff.quantile(.99) * 1e4:.3f}, '
+          f'max {diff.max() * 1e4:.3f} | exactly equal (to 1e-9): {exact:.1%} | gaps above 10 bp: '
+          f'{int((diff > 0.001).sum())}')
+    if exact > 0.5:
+        print('   CHECK many returns are bit-for-bit identical: two independent sources should differ in the last '
+              'digits (CRSP stores 6 decimals). Is the daily file really computed from Compustat prices?')
     for r in c.assign(gap=diff).nlargest(5, 'gap').itertuples():
-        print(f'          {r.ticker:6s} {r.date}  Compustat {r.compustat:+.2%}  CRSP {r.crsp:+.2%}')
+        print(f'          {str(r.ticker):6s} {r.date}  Compustat {r.compustat:+.4%}  CRSP {r.crsp:+.4%}  '
+              f'gap {r.gap * 1e4:.2f} bp')
     m = pd.DataFrame({'compustat': M[:, 0], 'crsp': ok.mkt_ret.to_numpy(dtype=float)}).dropna().drop_duplicates()
     mg = (m.compustat - m.crsp).abs()
     print(f'   {flag(mg.max() < 0.001)} VTI on event days: {len(m)} days, largest gap {mg.max() * 1e4:.1f} bp')
@@ -120,10 +135,13 @@ def main(final_path, daily_path):
     # 5. spot checks ------------------------------------------------------------------------------------------
     print(f'\n5. SPOT CHECKS (compare with adjusted closes on a public site)')
     size = d[~d.is_market].groupby('gvkey').mcap_lag1.median()
-    top = ok.assign(size=ok.gvkey.map(size).to_numpy(), i=np.arange(len(ok)))[full].nlargest(5, 'size')
+    top = ok.assign(size=ok.gvkey.map(size).to_numpy(), i=np.arange(len(ok)))[full]
+    top = top[top.ticker.notna()].sort_values('size', ascending=False, na_position='last').head(5)
+    if top.empty:
+        print('   no calls with a ticker and a full window')
     for r in top.itertuples():
         bh = np.prod(1 + S[r.i, 1:H + 1]) - 1
-        print(f'   {r.ticker:6s} day 0 = {cal[pos[r.i]].date()}, day {H} = {cal[pos[r.i] + H].date()}: '
+        print(f'   {str(r.ticker):6s} day 0 = {cal[pos[r.i]].date()}, day {H} = {cal[pos[r.i] + H].date()}: '
               f'stock {bh:+.1%} (buy-and-hold, days 1-{H}), filled days {int(filled[r.i, 1:].sum())}')
     print('   Yahoo Finance: (Adj Close on the day-60 date) / (Adj Close on the day-0 date) - 1 should be close.')
 
