@@ -30,8 +30,12 @@ def build(raw):
     """Compustat daily rows -> daily returns on VTI's trading calendar (rules in the module docstring)."""
     px = raw[(raw.prccd > 0) & raw.curcdd.eq('USD')].copy()
     px['date'] = px.date.astype('datetime64[ns]')
+    px = px.drop_duplicates(['gvkey', 'iid', 'date'])  # one row per security and day (as in section 7.2)
     px['is_market'] = px.gvkey.eq(MARKET[0]) & px.iid.eq(MARKET[1])
     cal = pd.DatetimeIndex(sorted(px.loc[px.is_market, 'date'].unique()))
+    if cal.empty:
+        raise SystemExit(f'Daily returns: no VTI rows (gvkey {MARKET[0]}, iid {MARKET[1]}) in comp.secd for the '
+                         'period, so there is no trading calendar. Check MARKET in pipeline/daily_returns.py.')
     px = px[px.date.isin(cal)].sort_values(['gvkey', 'iid', 'date'])
     px['adj'] = px.prccd / px.ajexdi
     px['tri'] = px.adj * px.trfd
