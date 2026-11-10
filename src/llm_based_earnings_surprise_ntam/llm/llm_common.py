@@ -8,11 +8,24 @@ from ..pipeline.config import load_config, paths
 from .rp_anonymizer import anonymize as rp_anonymize
 
 # same period and universe as the pipeline (config.yaml), whatever folder you run from
-_P = paths(load_config())
+_CFG = load_config()
+_P = paths(_CFG)
 MERGED = Path(_P["final"])
 SUMMARIES = MERGED.parent / "llm_summaries.parquet"
 SCORES = MERGED.parent / "llm_scores.parquet"
-MODEL = "qwen3:8b"   # "qwen3:4b" if your Mac has 8 GB RAM
+_LLM = _CFG.get("llm") or {}
+MODEL = _LLM.get("model", "qwen3:8b")     # config.yaml `llm` section; e.g. qwen3:8b for a laptop pilot
+SOURCE = _LLM.get("source", "summary")
+
+def require_ollama(model):
+    """Fail early, with a clear message, when the Ollama server or the model is not there."""
+    import ollama
+    try:
+        have = {m.model for m in ollama.list().models}
+    except Exception as e:
+        raise SystemExit(f"Ollama is not running ({e}). Start it with `ollama serve`, or run on Midway.")
+    if model not in have and f"{model}:latest" not in have:
+        raise SystemExit(f"Ollama has no model {model!r}: `ollama pull {model}` (or change llm.model in config.yaml)")
 
 def anonymize(text, company=None, ticker=None):
     """Mask speaker names, company name, ticker (rp_anonymizer) and years."""

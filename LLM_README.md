@@ -18,7 +18,9 @@ The code is in `src/llm_based_earnings_surprise_ntam/llm/`. Run every command fr
    ```bash
    ollama pull qwen3:8b
    ```
-   The model is set in `llm/llm_common.py` (`MODEL`). Use `qwen3:4b` on a Mac with 8 GB RAM.
+   The model and the text the scorer reads are set in `config.yaml` (`llm: model, source`); `--model` and `--source`
+   override them for one command. The full Q4 2025 run used `qwen3:30b-a3b-instruct-2507-q4_K_M` on summaries (the
+   config default). Use `qwen3:8b` for a laptop pilot, `qwen3:4b` on a Mac with 8 GB RAM.
 
 ---
 
@@ -28,8 +30,8 @@ The code is in `src/llm_based_earnings_surprise_ntam/llm/`. Run every command fr
 summarizer and the scorer always use the same calls.
 
 ```bash
-uv run python -m llm_based_earnings_surprise_ntam.llm.llm_summarize --n 30
-uv run python -m llm_based_earnings_surprise_ntam.llm.llm_score --n 30 --source summary
+uv run python -m llm_based_earnings_surprise_ntam.llm.llm_summarize --n 30 --model qwen3:8b
+uv run python -m llm_based_earnings_surprise_ntam.llm.llm_score --n 30 --source summary --model qwen3:8b
 uv run python -m llm_based_earnings_surprise_ntam.llm.llm_eval
 ```
 
@@ -55,6 +57,11 @@ uv run python -m llm_based_earnings_surprise_ntam.llm.llm_eval
 On a MacBook Air with `qwen3:8b`, one summary took about 30 seconds and one score about 4 seconds, so the full
 summarize run takes roughly a day. You can stop with Ctrl+C at any time and rerun the same command: it skips
 calls already saved (it saves every 10 calls).
+
+**Or let `doit` do it.** `uv run doit` runs the pipeline, then `llm_summarize`, `llm_score`, `llm_merge`,
+`llm_eval` and the long-short backtest (PIPELINE.md section 6) with the model and source in `config.yaml`. The LLM
+tasks only send calls that are not done yet, so once everything is scored the whole run takes seconds and needs no
+Ollama. `doit clean` never deletes the summaries or scores.
 
 ---
 
@@ -123,6 +130,8 @@ Both files are in `data/processed/` (not tracked by git) and join to the pipelin
 |---|---|---|
 | `llm_summaries.parquet` | call | `transcriptid, summary, words_in, words_out, model, seconds` |
 | `llm_scores.parquet` | call x source x model | `transcriptid, keydevid, ticker, event_date, prediction, reasons, model, source, seconds` |
+| `llm_merged_<tag>.parquet` | in-sample call | the pipeline's columns (no transcript text) + summary + the configured run's `prediction` (`llm_merge`) |
+| `llm_eval_<tag>.txt` | | day-0 R² of the surprise, the LLM score and both, per model and source (`llm_eval`) |
 
 ```python
 import pandas as pd

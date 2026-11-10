@@ -56,3 +56,11 @@ returns:
 sample:
   require_transcript_by_event_close: false  # also require the chosen transcript to exist by 16:00 ET on the event date
   baseline_r2_warn: 0.05                    # warn when the surprise-only R2 falls below this (paper: 5.0%)
+
+# --- LLM step and long-short backtest (LLM_README.md; PIPELINE.md section 6) ---
+
+llm:
+  model: qwen3:30b-a3b-instruct-2507-q4_K_M  # Ollama model for summaries and scores (the full Q4 2025 run);
+                                              # qwen3:8b fits a 16 GB laptop for pilots
+  source: summary          # what the scorer reads: summary | full_text | presentation_text | qa_text
+                           # the summaries and scores files are resumable: doit only sends calls not yet done

@@ -9,7 +9,7 @@ import argparse, time
 import pandas as pd
 import ollama
 
-from .llm_common import (MERGED, SUMMARIES, MODEL, anonymize, clean,
+from .llm_common import (MERGED, SUMMARIES, MODEL, anonymize, clean, require_ollama,
                             select_events, load_done, save_append)
 
 COMPRESSION = 28
@@ -65,14 +65,14 @@ def target_length(text):
     target = max(MIN_WORDS, round(len(text.split()) / COMPRESSION))
     return target, round(target * 1.3)
 
-def chat(messages, max_words):
+def chat(messages, max_words, model=MODEL):
     resp = ollama.chat(
-        model=MODEL, messages=messages, think=False,
+        model=model, messages=messages, think=False,
         options={"temperature": 0, "num_ctx": 32768, "num_predict": max_words * 3},
     )
     return clean(resp["message"]["content"])
 
-def summarize(transcript, retries=3):
+def summarize(transcript, retries=3, model=MODEL):
     target_words, max_words = target_length(transcript)
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": USER_TEMPLATE.format(
@@ -80,7 +80,7 @@ def summarize(transcript, retries=3):
                     compression=COMPRESSION, transcript=transcript)}]
     for attempt in range(retries):
         try:
-            summary = chat(messages, max_words)
+            summary = chat(messages, max_words, model)
             if not summary:
                 raise ValueError("empty response")
             if len(summary.split()) > max_words:          # one shortening pass
@@ -88,42 +88,49 @@ def summarize(transcript, retries=3):
                     {"role": "assistant", "content": summary},
                     {"role": "user", "content": SHORTEN.format(
                         n_words=len(summary.split()), target_words=target_words)},
-                ], max_words) or summary
+                ], max_words, model) or summary
             return summary
         except Exception as e:
             print(f"  attempt {attempt + 1} failed: {e}")
             time.sleep(2 ** attempt)
     return None
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--n", type=int, help="pilot size (early-quarter calls)")
-    args = ap.parse_args()
-
-    df = select_events(pd.read_parquet(MERGED), args.n)
-    done = load_done(SUMMARIES)
+def run(merged=MERGED, out=SUMMARIES, model=MODEL, n=None):
+    """Summarize the in-sample calls not yet in `out` (all of them, or a pilot of n). Resumable."""
+    df = select_events(pd.read_parquet(merged), n)
+    done = load_done(out)
     if not done.empty:
         df = df[~df["transcriptid"].isin(done["transcriptid"])]
-    print(f"{len(df)} calls to summarize with {MODEL}")
+    print(f"{len(df)} calls to summarize with {model}")
+    if df.empty:
+        return
+    require_ollama(model)
 
     rows = []
     for i, r in enumerate(df.itertuples(index=False), 1):
         text = anonymize(r.full_text, r.companyname, r.ticker)   # summarize anonymized text
         t0 = time.time()
-        summary = summarize(text)
+        summary = summarize(text, model=model)
         if summary is None:
             print(f"[{i}/{len(df)}] {r.ticker} failed, will retry next run")
             continue
         n_in, n_out = len(text.split()), len(summary.split())
         rows.append({"transcriptid": r.transcriptid, "summary": summary,
-                     "words_in": n_in, "words_out": n_out, "model": MODEL,
+                     "words_in": n_in, "words_out": n_out, "model": model,
                      "seconds": round(time.time() - t0, 1)})
         print(f"[{i}/{len(df)}] {r.ticker}: {n_out} words "
               f"({n_in / max(1, n_out):.0f}x shorter, {rows[-1]['seconds']}s)")
         if len(rows) >= 10:
-            done, rows = save_append(SUMMARIES, done, rows), []
+            done, rows = save_append(out, done, rows), []
     if rows:
-        save_append(SUMMARIES, done, rows)
+        save_append(out, done, rows)
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--n", type=int, help="pilot size (early-quarter calls)")
+    ap.add_argument("--model", default=MODEL, help="Ollama model (default: llm.model in config.yaml)")
+    args = ap.parse_args()
+    run(model=args.model, n=args.n)
 
 if __name__ == "__main__":
     main()
