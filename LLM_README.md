@@ -145,3 +145,100 @@ both = df.merge(scores[["transcriptid", "model", "source", "prediction", "reason
 - **`ModuleNotFoundError: src...`** means an old command. The module name starts with
   `llm_based_earnings_surprise_ntam.llm.`, never `src.`.
 - **Connection error** means Ollama is not running.
+
+---
+
+## 8. Full panel on the RCC Midway cluster (vLLM)
+
+`llm/llm_vllm.py` runs sections 2-3 (summarize, then score the summaries) for every in-sample call in one GPU job,
+with the same prompts and anonymization. Rows are written to the same two output files, tagged with the model id
+`Qwen/Qwen3-8B` (the Ollama runs are tagged `qwen3:8b`), so `llm_eval` reports the two separately.
+
+1. **On your laptop:** rebuild the final dataset (`uv run doit`; it must have the `in_sample` column), and push
+   the branch.
+2. **On a Midway3 login node** (`ssh <cnetid>@midway3.rcc.uchicago.edu`), clone the repo and check out the
+   branch, then run once:
+   ```bash
+   bash scripts/midway/setup.sh      # uv, .venv with vLLM, model weights in /scratch/midway3/$USER/hf
+   ```
+3. **Copy the data up** (it is licensed and not in git). From the repo root on your laptop:
+   ```bash
+   scp data/processed/earnings_calls_ibes_20251001_20251231_us.parquet \
+       <cnetid>@midway3.rcc.uchicago.edu:<repo on midway>/data/processed/
+   ```
+4. **Set `--account`** in `scripts/midway/score_panel.sbatch` (`pi-<your PI>`; `rcchelp` lists yours with
+   `accounts`), then submit a pilot and the full run:
+   ```bash
+   sbatch --export=ALL,ARGS="--n 30" scripts/midway/score_panel.sbatch
+   sbatch scripts/midway/score_panel.sbatch
+   squeue -u $USER                   # status; log is qwen-score-<jobid>.out in the repo root
+   ```
+   The job saves after every 256 calls. If it hits the time limit, submit it again and it continues.
+5. **Copy the results back** and evaluate locally:
+   ```bash
+   scp <cnetid>@midway3.rcc.uchicago.edu:<repo on midway>/data/processed/llm_{summaries,scores}.parquet data/processed/
+   uv run python -m llm_based_earnings_surprise_ntam.llm.llm_eval
+   ```
+   This overwrites the local files: copy them under another name first if they hold Ollama runs you want to keep.
+
+Options (`ARGS="..."`): `--model Qwen/Qwen3-14B`, `--skip-summarize` (score existing summaries only),
+`--dtype half` on V100 GPUs (no bf16), `--tp 2` to split a large model over two GPUs (also set `--gres=gpu:2`).
+
+---
+
+## 9. Other models through OpenRouter
+
+`llm_summarize` and `llm_score` run on any OpenRouter model with `--backend openrouter --model <id>`. Without
+these flags they use local Ollama, as before. Copy model ids exactly from openrouter.ai/models.
+
+**Setup (once):**
+- Put the key in `.env` at the repo root: `OPENROUTER_API_KEY=sk-or-v1-...`. The file is git-ignored.
+- Rebuild the dataset with `uv run doit` if it has no `in_sample` column. The scripts stop with a message if so.
+
+**Options:**
+
+| Flag | What it does |
+|---|---|
+| `--max-cost 5` | stops the run once $5 is spent. The cost of every call is saved in the `cost` column |
+| `--workers 8` | parallel requests (default 8 on OpenRouter, 1 on Ollama) |
+| `--reasoning-effort minimal` | for reasoning models (e.g. `openai/gpt-5-nano`), whose hidden thinking tokens are billed |
+| `--with-numbers` (score) | adds reported EPS, consensus and surprise (I/B/E/S) above the text |
+| `--summary-model <id>` (score) | scores another model's summaries; default is the scoring model's own |
+| `--import-merged` (summarize) | copies the summaries in `llm_merged_<period>.parquet` into `llm_summaries.parquet`; no model calls |
+
+Every run is resumable and skips calls already done for the same model, source, summary author and prompt
+variant. So a 30-call pilot is not wasted: the full run picks up after it. Failed calls are retried on the next
+run.
+
+**Only use models trained before the sample.** A model whose training data runs past the quarter may have seen
+how these stocks moved (look-ahead). For Q4 2025 that rules out the Gemini 3.x, Claude 5.x and GPT-5.4+
+families. Check the model card.
+
+**Suggested runs for a ~$40 budget.** Pilot each with `--n 30` first and check the cost it prints.
+```bash
+M=llm_based_earnings_surprise_ntam.llm
+OR="--backend openrouter"
+
+# 0. reuse the existing Qwen summaries (free)
+uv run python -m $M.llm_summarize --import-merged
+
+# 1. Gemini 2.5 Flash-Lite: own summaries (paper Table 3) and full transcripts (Table 2), about $6
+uv run python -m $M.llm_summarize $OR --model google/gemini-2.5-flash-lite --max-cost 4
+uv run python -m $M.llm_score     $OR --model google/gemini-2.5-flash-lite --source summary   --max-cost 1
+uv run python -m $M.llm_score     $OR --model google/gemini-2.5-flash-lite --source full_text --max-cost 3
+
+# 2. GPT-5 nano, same two setups (a reasoning model: keep effort minimal), about $8-10
+uv run python -m $M.llm_summarize $OR --model openai/gpt-5-nano --reasoning-effort minimal --max-cost 6
+uv run python -m $M.llm_score     $OR --model openai/gpt-5-nano --reasoning-effort minimal --source summary   --max-cost 2
+uv run python -m $M.llm_score     $OR --model openai/gpt-5-nano --reasoning-effort minimal --source full_text --max-cost 4
+
+# 3. Opus 4.5 scoring the Qwen summaries (like the paper's Table 4: one set of summaries for every model), about $16
+uv run python -m $M.llm_score $OR --model anthropic/claude-opus-4.5 --source summary \
+    --summary-model qwen3:30b-a3b-instruct-2507-q4_K_M --max-cost 18
+
+# 4. the same with the earnings numbers in the prompt (cheap model, under $1)
+uv run python -m $M.llm_score $OR --model google/gemini-2.5-flash-lite --source summary --with-numbers --max-cost 1
+
+# results: one block per model / source / summary author / prompt variant, with its cost
+uv run python -m $M.llm_eval
+```
