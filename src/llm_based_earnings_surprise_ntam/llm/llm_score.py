@@ -10,8 +10,8 @@ import argparse, json, time
 import pandas as pd
 import ollama
 
-from .llm_common import (MERGED, SUMMARIES, SCORES, MODEL, anonymize, clean,
-                            select_events, load_done, save_append)
+from .llm_common import (MERGED, SUMMARIES, SCORES, MODEL, NUM_CTX, anonymize, clean,
+                         select_events, load_done, load_all, shard_path, save_append)
 
 SOURCES = ["full_text", "presentation_text", "qa_text", "summary"]
 
@@ -47,7 +47,7 @@ def score(text, retries=3):
                 model=MODEL, think=False, format="json",
                 messages=[{"role": "system", "content": SYSTEM},
                           {"role": "user", "content": USER_TEMPLATE.format(text=text)}],
-                options={"temperature": 0, "num_ctx": 32768},
+                options={"temperature": 0, "num_ctx": NUM_CTX},
             )
             raw = clean(resp["message"]["content"])
             out = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
@@ -62,24 +62,32 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, help="pilot size (early-quarter calls)")
     ap.add_argument("--source", default="full_text", choices=SOURCES)
+    ap.add_argument("--shard", type=int, help="this job's number (0 .. nshards-1)")
+    ap.add_argument("--nshards", type=int, default=1)
     args = ap.parse_args()
 
-    df = select_events(pd.read_parquet(MERGED), args.n)
+    df = select_events(pd.read_parquet(MERGED), args.n, shard=args.shard, nshards=args.nshards)
     if args.source == "summary":
-        if not SUMMARIES.exists():
-            raise SystemExit("No summaries yet: run `uv run python -m llm_based_earnings_surprise_ntam.llm.llm_summarize` first")
-        df = df.merge(pd.read_parquet(SUMMARIES)[["transcriptid", "summary"]], on="transcriptid")
+        s = load_all(SUMMARIES)
+        s = s[s["model"] == MODEL] if not s.empty else s     # only this model's summaries
+        if s.empty:
+            raise SystemExit(f"No {MODEL} summaries yet: run llm_summarize first")
+        df = df.merge(s[["transcriptid", "summary"]].drop_duplicates("transcriptid"),
+                      on="transcriptid")
 
-    done = load_done(SCORES)
-    if not done.empty:
-        mine = done[(done["source"] == args.source) & (done["model"] == MODEL)]
+    out_path = shard_path(SCORES, args.shard)
+    seen = load_all(SCORES)
+    if not seen.empty:
+        mine = seen[(seen["source"] == args.source) & (seen["model"] == MODEL)]
         df = df[~df["transcriptid"].isin(mine["transcriptid"])]
+    done = load_done(out_path)
     print(f"{len(df)} calls to score with {MODEL} on {args.source}")
 
     rows = []
     for i, r in enumerate(df.itertuples(index=False), 1):
         raw = getattr(r, args.source)
-        text = raw if args.source == "summary" else anonymize(raw, r.companyname, r.ticker)
+        # mask summaries too: the model sometimes writes the year or name back in
+        text = anonymize(raw, r.companyname, r.ticker)
         t0 = time.time()
         res = score(text)
         rows.append({"transcriptid": r.transcriptid, "keydevid": r.keydevid,
@@ -91,9 +99,9 @@ def main():
         print(f"[{i}/{len(df)}] {r.ticker} {str(r.event_date)[:10]} -> "
               f"{res.get('prediction')} ({rows[-1]['seconds']}s)")
         if len(rows) >= 10:
-            done, rows = save_append(SCORES, done, rows), []
+            done, rows = save_append(out_path, done, rows), []
     if rows:
-        save_append(SCORES, done, rows)
+        save_append(out_path, done, rows)
 
 if __name__ == "__main__":
     main()
