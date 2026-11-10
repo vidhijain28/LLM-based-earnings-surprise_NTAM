@@ -1,0 +1,6 @@
+# Environment for the prompt optimization only (separate from the pipeline's pyproject.toml). Python >= 3.10.
+gepa==0.1.4
+numpy
+pandas
+pyarrow
+pyyaml
