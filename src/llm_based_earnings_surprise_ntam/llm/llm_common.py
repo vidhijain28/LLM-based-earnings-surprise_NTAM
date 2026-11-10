@@ -1,5 +1,5 @@
 """Shared settings and helpers for the LLM steps."""
-import re
+import os, re
 from pathlib import Path
 
 import pandas as pd
@@ -11,11 +11,15 @@ from .rp_anonymizer import anonymize as rp_anonymize
 _CFG = load_config()
 _P = paths(_CFG)
 MERGED = Path(_P["final"])
-SUMMARIES = MERGED.parent / "llm_summaries.parquet"
-SCORES = MERGED.parent / "llm_scores.parquet"
+# LLM_TAG=xyz writes llm_summaries_xyz.parquet etc., to test a change without touching the main files
+_TAG = f"_{os.environ['LLM_TAG']}" if os.environ.get("LLM_TAG") else ""
+SUMMARIES = MERGED.parent / f"llm_summaries{_TAG}.parquet"
+SCORES = MERGED.parent / f"llm_scores{_TAG}.parquet"
 _LLM = _CFG.get("llm") or {}
-MODEL = _LLM.get("model", "qwen3:8b")     # config.yaml `llm` section; e.g. qwen3:8b for a laptop pilot
+# config.yaml `llm` section; e.g. qwen3:8b for a laptop pilot. The env vars override it (run_llm.sh on Midway).
+MODEL = os.environ.get("LLM_MODEL") or _LLM.get("model", "qwen3:8b")
 SOURCE = _LLM.get("source", "summary")
+NUM_CTX = int(os.environ.get("LLM_NUM_CTX") or _LLM.get("num_ctx", 32768))   # Midway RTX 6000: 24576
 
 def require_ollama(model):
     """Fail early, with a clear message, when the Ollama server or the model is not there."""
@@ -35,22 +39,41 @@ def anonymize(text, company=None, ticker=None):
     return re.sub(r"\b(19|20)\d{2}\b", "[YEAR]", out)
 
 def clean(raw):
-    """Strip qwen3 <think> blocks."""
-    return re.sub(r"<think>.*?</think>", "", raw or "", flags=re.S).strip()
+    """Strip qwen3 reasoning: <think>...</think> blocks, and anything before a lone </think>
+    (thinking-only models get <think> from the template, so only the closing tag is output)."""
+    out = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.S)
+    return out.split("</think>")[-1].strip()
 
-def select_events(df, n=None, seed=0):
-    """In-sample events; with n, a fixed random pilot from the first half of the quarter."""
+def select_events(df, n=None, seed=0, shard=None, nshards=1):
+    """In-sample events; with n, a fixed random pilot from the first half of the quarter;
+    with shard, only this job's share of the calls."""
     df = df[df["in_sample"]].copy()
     if n:
         early = df[df["event_date"] <= df["event_date"].median()]
         df = early.sample(n=min(n, len(early)), random_state=seed)
+    if shard is not None:
+        df = df[df["transcriptid"].astype("int64") % nshards == shard]
     return df
 
+def shard_path(path, shard=None):
+    """llm_scores.parquet -> llm_scores_shard2.parquet for job 2."""
+    path = Path(path)
+    return path if shard is None else path.with_name(f"{path.stem}_shard{shard}{path.suffix}")
+
 def load_done(path):
-    return pd.read_parquet(path) if path.exists() else pd.DataFrame()
+    return pd.read_parquet(path) if Path(path).exists() else pd.DataFrame()
+
+def load_all(path):
+    """The main file plus any shard files (written by parallel GPU jobs, see run_llm.sh)."""
+    path = Path(path)
+    files = [path] if path.exists() else []
+    files += sorted(f for f in path.parent.glob(f"{path.stem}_shard*{path.suffix}")
+                    if ".tmp" not in f.name)
+    return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True) if files else pd.DataFrame()
 
 def save_append(path, done, rows):
     """Append rows and write safely (temp file, then rename)."""
+    path = Path(path)
     out = pd.concat([done, pd.DataFrame(rows)], ignore_index=True)
     tmp = path.with_suffix(".tmp.parquet")
     out.to_parquet(tmp, index=False)

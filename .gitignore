@@ -12,5 +12,7 @@ llm_scores.csv
 
 # Local tooling and OS clutter
 .venv/
+# Slurm and Ollama logs from run_llm.sh
+logs/
 .ipynb_checkpoints/
 .DS_Store

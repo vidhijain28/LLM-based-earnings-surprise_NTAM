@@ -5,14 +5,15 @@ Run from the repo root:
   uv run python -m llm_based_earnings_surprise_ntam.llm.llm_score --n 30 --source summary     # pilot on summaries
   uv run python -m llm_based_earnings_surprise_ntam.llm.llm_score --source qa_text            # all calls, Q&A only
 Model and default source come from the `llm` section of config.yaml (override with --model / --source).
+On Midway, run_llm.sh splits the calls across GPU jobs with --shard / --nshards.
 """
 import argparse, json, time
 
 import pandas as pd
 import ollama
 
-from .llm_common import (MERGED, SUMMARIES, SCORES, MODEL, SOURCE, anonymize, clean, require_ollama,
-                            select_events, load_done, save_append)
+from .llm_common import (MERGED, SUMMARIES, SCORES, MODEL, SOURCE, NUM_CTX, anonymize, clean, require_ollama,
+                         select_events, load_done, load_all, shard_path, save_append)
 
 SOURCES = ["full_text", "presentation_text", "qa_text", "summary"]
 
@@ -48,7 +49,7 @@ def score(text, retries=3, model=MODEL):
                 model=model, think=False, format="json",
                 messages=[{"role": "system", "content": SYSTEM},
                           {"role": "user", "content": USER_TEMPLATE.format(text=text)}],
-                options={"temperature": 0, "num_ctx": 32768},
+                options={"temperature": 0, "num_ctx": NUM_CTX},
             )
             raw = clean(resp["message"]["content"])
             out = json.loads(raw[raw.find("{"): raw.rfind("}") + 1])
@@ -59,20 +60,25 @@ def score(text, retries=3, model=MODEL):
             time.sleep(2 ** attempt)
     return {"prediction": None, "reasons": ["failed"]}
 
-def run(merged=MERGED, summaries=SUMMARIES, out=SCORES, model=MODEL, source=SOURCE, n=None):
-    """Score the in-sample calls not yet scored by (model, source) in `out`. Resumable."""
+def run(merged=MERGED, summaries=SUMMARIES, out=SCORES, model=MODEL, source=SOURCE, n=None,
+        shard=None, nshards=1):
+    """Score the in-sample calls not yet scored by (model, source) in `out` or its shard files. Resumable.
+    With shard, only this job's share is done and written to the job's own shard file."""
     if source not in SOURCES:
         raise SystemExit(f"source must be one of {SOURCES}, got {source!r}")
-    df = select_events(pd.read_parquet(merged), n)
+    df = select_events(pd.read_parquet(merged), n, shard=shard, nshards=nshards)
     if source == "summary":
-        if not summaries.exists():
+        summ = load_all(summaries)     # main file + shard files of jobs still running
+        if summ.empty:
             raise SystemExit("No summaries yet: run `uv run python -m llm_based_earnings_surprise_ntam.llm.llm_summarize` first")
-        df = df.merge(pd.read_parquet(summaries)[["transcriptid", "summary"]], on="transcriptid")
+        df = df.merge(summ[["transcriptid", "summary"]].drop_duplicates("transcriptid"), on="transcriptid")
 
-    done = load_done(out)
-    if not done.empty:
-        mine = done[(done["source"] == source) & (done["model"] == model)]
+    seen = load_all(out)
+    if not seen.empty:
+        mine = seen[(seen["source"] == source) & (seen["model"] == model)]
         df = df[~df["transcriptid"].isin(mine["transcriptid"])]
+    out_path = shard_path(out, shard)
+    done = load_done(out_path)
     print(f"{len(df)} calls to score with {model} on {source}")
     if df.empty:
         return
@@ -81,7 +87,8 @@ def run(merged=MERGED, summaries=SUMMARIES, out=SCORES, model=MODEL, source=SOUR
     rows = []
     for i, r in enumerate(df.itertuples(index=False), 1):
         raw = getattr(r, source)
-        text = raw if source == "summary" else anonymize(raw, r.companyname, r.ticker)
+        # mask summaries too: the model sometimes writes the year or name back in
+        text = anonymize(raw, r.companyname, r.ticker)
         t0 = time.time()
         res = score(text, model=model)
         rows.append({"transcriptid": r.transcriptid, "keydevid": r.keydevid,
@@ -93,17 +100,19 @@ def run(merged=MERGED, summaries=SUMMARIES, out=SCORES, model=MODEL, source=SOUR
         print(f"[{i}/{len(df)}] {r.ticker} {str(r.event_date)[:10]} -> "
               f"{res.get('prediction')} ({rows[-1]['seconds']}s)")
         if len(rows) >= 10:
-            done, rows = save_append(out, done, rows), []
+            done, rows = save_append(out_path, done, rows), []
     if rows:
-        save_append(out, done, rows)
+        save_append(out_path, done, rows)
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, help="pilot size (early-quarter calls)")
     ap.add_argument("--source", default=SOURCE, choices=SOURCES, help="default: llm.source in config.yaml")
     ap.add_argument("--model", default=MODEL, help="Ollama model (default: llm.model in config.yaml)")
+    ap.add_argument("--shard", type=int, help="this job's number (0 .. nshards-1)")
+    ap.add_argument("--nshards", type=int, default=1)
     args = ap.parse_args()
-    run(model=args.model, source=args.source, n=args.n)
+    run(model=args.model, source=args.source, n=args.n, shard=args.shard, nshards=args.nshards)
 
 if __name__ == "__main__":
     main()
