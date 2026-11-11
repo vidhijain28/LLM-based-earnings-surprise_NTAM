@@ -1,16 +1,22 @@
-"""Summarize transcripts (~28x shorter, as in Koijen & Levy) with a local LLM.
+"""Summarize transcripts (~28x shorter, as in Koijen & Levy) with an LLM.
 
-Run from the repo root:
+Run from the repo root (local Ollama, free):
   uv run python -m llm_based_earnings_surprise_ntam.llm.llm_summarize --n 30    # pilot (same calls as llm_score --n 30)
   uv run python -m llm_based_earnings_surprise_ntam.llm.llm_summarize           # all in-sample calls (resumable)
+
+Through OpenRouter (paid; see LLM_README.md section 9):
+  uv run python -m llm_based_earnings_surprise_ntam.llm.llm_summarize --backend openrouter       --model google/gemini-2.5-flash-lite --n 30 --max-cost 1
+
+Reuse summaries from an earlier scored panel (llm_merged_<period>.parquet; no model calls):
+  uv run python -m llm_based_earnings_surprise_ntam.llm.llm_summarize --import-merged
 """
 import argparse, time
 
 import pandas as pd
-import ollama
 
-from .llm_common import (MERGED, SUMMARIES, MODEL, anonymize, clean,
-                            select_events, load_done, save_append)
+from .llm_common import (MERGED, SUMMARIES, LLM_MERGED, RUN, add_llm_args, configure, chat, add_usage,
+                         over_budget, spent_note, run_parallel, chunk_size, anonymize,
+                         select_events, load_done, save_append)
 
 COMPRESSION = 28
 MIN_WORDS = 150
@@ -65,65 +71,97 @@ def target_length(text):
     target = max(MIN_WORDS, round(len(text.split()) / COMPRESSION))
     return target, round(target * 1.3)
 
-def chat(messages, max_words):
-    resp = ollama.chat(
-        model=MODEL, messages=messages, think=False,
-        options={"temperature": 0, "num_ctx": 32768, "num_predict": max_words * 3},
-    )
-    return clean(resp["message"]["content"])
-
 def summarize(transcript, retries=3):
+    """Returns (summary or None, usage summed over calls, number of passes)."""
     target_words, max_words = target_length(transcript)
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": USER_TEMPLATE.format(
                     target_words=target_words, max_words=max_words,
                     compression=COMPRESSION, transcript=transcript)}]
+    usage = {}
     for attempt in range(retries):
         try:
-            summary = chat(messages, max_words)
+            summary, u = chat(messages, max_tokens=max_words * 3)
+            add_usage(usage, u)
             if not summary:
                 raise ValueError("empty response")
+            passes = 1
             if len(summary.split()) > max_words:          # one shortening pass
-                summary = chat(messages + [
+                shorter, u = chat(messages + [
                     {"role": "assistant", "content": summary},
                     {"role": "user", "content": SHORTEN.format(
                         n_words=len(summary.split()), target_words=target_words)},
-                ], max_words) or summary
-            return summary
+                ], max_tokens=max_words * 3)
+                add_usage(usage, u)
+                summary, passes = shorter or summary, 2
+            return summary, usage, passes
         except Exception as e:
             print(f"  attempt {attempt + 1} failed: {e}")
             time.sleep(2 ** attempt)
-    return None
+    return None, usage, 0
+
+
+def import_merged(path=LLM_MERGED):
+    """Copy the summaries saved in a scored panel (llm_merged_<period>.parquet) into llm_summaries.parquet,
+    tagged with the model that wrote them, so other models can score them (--summary-model)."""
+    if not path.exists():
+        raise SystemExit(f"{path} not found")
+    m = pd.read_parquet(path, columns=["transcriptid", "summary", "sum_words_in", "sum_words_out",
+                                       "sum_passes", "sum_model", "sum_seconds"])
+    m = m.dropna(subset=["summary"]).rename(columns={
+        "sum_words_in": "words_in", "sum_words_out": "words_out", "sum_passes": "passes",
+        "sum_model": "model", "sum_seconds": "seconds"})
+    done = load_done(SUMMARIES)
+    if not done.empty:
+        have = set(zip(done["transcriptid"], done["model"]))
+        m = m[[k not in have for k in zip(m["transcriptid"], m["model"])]]
+    save_append(SUMMARIES, done, m.assign(backend="imported").to_dict("records"))
+    print(f"Imported {len(m):,} summaries from {path.name} "
+          f"(models: {sorted(m['model'].unique().tolist())}) into {SUMMARIES.name}")
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, help="pilot size (early-quarter calls)")
+    ap.add_argument("--import-merged", action="store_true",
+                    help=f"copy summaries from {LLM_MERGED.name} instead of calling a model")
+    add_llm_args(ap)
     args = ap.parse_args()
+    if args.import_merged:
+        return import_merged()
+    configure(args)
+    model = RUN["model"]
 
     df = select_events(pd.read_parquet(MERGED), args.n)
     done = load_done(SUMMARIES)
     if not done.empty:
-        df = df[~df["transcriptid"].isin(done["transcriptid"])]
-    print(f"{len(df)} calls to summarize with {MODEL}")
+        df = df[~df["transcriptid"].isin(done.loc[done["model"] == model, "transcriptid"])]
+    print(f"{len(df)} calls to summarize with {model}")
 
-    rows = []
-    for i, r in enumerate(df.itertuples(index=False), 1):
+    def one(r):
         text = anonymize(r.full_text, r.companyname, r.ticker)   # summarize anonymized text
         t0 = time.time()
-        summary = summarize(text)
+        summary, usage, passes = summarize(text)
         if summary is None:
-            print(f"[{i}/{len(df)}] {r.ticker} failed, will retry next run")
-            continue
+            print(f"  {r.ticker} failed, will retry next run")
+            return None
         n_in, n_out = len(text.split()), len(summary.split())
-        rows.append({"transcriptid": r.transcriptid, "summary": summary,
-                     "words_in": n_in, "words_out": n_out, "model": MODEL,
-                     "seconds": round(time.time() - t0, 1)})
-        print(f"[{i}/{len(df)}] {r.ticker}: {n_out} words "
-              f"({n_in / max(1, n_out):.0f}x shorter, {rows[-1]['seconds']}s)")
-        if len(rows) >= 10:
-            done, rows = save_append(SUMMARIES, done, rows), []
-    if rows:
-        save_append(SUMMARIES, done, rows)
+        print(f"  {r.ticker}: {n_out} words ({n_in / max(1, n_out):.0f}x shorter, {time.time() - t0:.1f}s)")
+        return {"transcriptid": r.transcriptid, "summary": summary, "words_in": n_in, "words_out": n_out,
+                "passes": passes, "model": model, "backend": RUN["backend"],
+                "seconds": round(time.time() - t0, 1), **usage}
+
+    n_done = 0
+    for start in range(0, len(df), chunk_size()):
+        if over_budget():
+            print(f"Budget of ${RUN['max_cost']:.2f} reached; stopping. Rerun to continue where it stopped.")
+            break
+        rows = [x for x in run_parallel(list(df.iloc[start:start + chunk_size()].itertuples(index=False)), one) if x]
+        done = save_append(SUMMARIES, done, rows)
+        n_done += len(rows)
+        print(f"[{min(start + chunk_size(), len(df))}/{len(df)}] {n_done} saved. {spent_note()}")
+    print(f"Done: {n_done} summaries. {spent_note()}")
+
 
 if __name__ == "__main__":
     main()

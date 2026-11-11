@@ -14,3 +14,5 @@ llm_scores.csv
 .venv/
 .ipynb_checkpoints/
 .DS_Store
+.env
+qwen-score-*.out
