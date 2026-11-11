@@ -467,28 +467,31 @@ Also writes `industry_neutral_results.csv` (every variant and window) and `indus
 
 Section 6 asks whether the surprise is still tradable after the event day. This section asks the same of the LLM score. The LLM step shows the score explains the day-0 reaction, an incremental R² of 0.055 to 0.065 over the surprise depending on the run ([`llm_results.ipynb`](src/llm_based_earnings_surprise_ntam/further_study/llm_results.ipynb)), but a signal built from the call cannot trade day 0. The stage gate 1 question is what is left after the day-0 close, and whether it is more than the surprise.
 
-**Result (Q4 2025):** after the day-0 close, the LLM's top fifth beats its bottom fifth by **1.0% to 1.3% in the first week** for all events, about what the surprise earns on the same events, and by **1.5% to 2.5% in US large caps**, less than the surprise there (+3.0%). It is not an industry or size bet, and the surprise does not absorb it. For all events it partly reverses after about two weeks, so a monthly rebalance would capture little. The 12-week window cannot be tested yet: the price panel ends 2026-01-30.
+**Result (Q4 2025):** after the day-0 close, the LLM's top fifth beats its bottom fifth by **1.0% to 1.3% in the first week** for all events, about what the surprise earns on the same events, and by **1.5% to 2.5% in US large caps**, less than the surprise there (+3.0%). It is not an industry or size bet, and the surprise does not absorb it. **Then it reverses: over 12 weeks the spread is −2.5% to −5.9% for all events** (t −3.0 to −4.9), as the worst-scored events rebound, and part of that is an industry rotation. In large caps the 12-week LLM result is noise, while the surprise keeps drifting to +6.9% (t 3.8). The LLM looks like a one-week signal; the surprise in large caps, a longer one.
 
 | Decision | What we do |
 |---|---|
 | Scores | The three runs of the LLM step: Gemini 2.5 Flash-Lite on its own summaries, Gemini on Qwen's summaries, Qwen3-30B on its own summaries |
 | Events | Scored events matched to section 6's Compustat panel, kept only if the transcript existed by 16:00 ET on the event date (`transcript_by_event_close`): **2,292** of 2,517 (2,293 of 2,518 for Qwen), of which **580** are US large caps (US-incorporated, market cap ≥ $10bn the day before, as in section 6). The score has to exist before the entry price |
-| Trade | As in section 6: fifths in one pool, equal weights, enter at the day-0 close, CAR against VTI over days 1–5 and 1–20, winsorized at 1% and 99%, t-statistics clustered by event date |
+| Prices | Section 7.2's panel extended to 2026-04-30 with Xiao's `scripts/extend_compustat_prices.py` (on the `xiao` branch), so every event has 60 trading days. The extension keeps all 1.79M original rows unchanged (checked cell by cell, and VTI on all 105 original days) |
+| Trade | As in section 6: fifths in one pool, equal weights, enter at the day-0 close, CAR against VTI over days 1–5, 1–20 and 1–60, winsorized at 1% and 99%, t-statistics clustered by event date |
 | Benchmark | The surprise (`sue`) sorted the same way on the same events |
 
 Top fifth minus bottom fifth after the day-0 close, % (t-statistic):
 
-| Run | All events, 1 week | All events, 4 weeks | US large caps, 1 week | US large caps, 4 weeks |
-|---|---|---|---|---|
-| Gemini, own summaries | +1.3 (2.9) | +0.5 (0.5) | **+2.5 (4.3)** | +2.4 (2.7) |
-| Gemini, Qwen's summaries | +1.3 (2.5) | −0.2 (−0.2) | +1.5 (2.7) | −0.2 (−0.2) |
-| Qwen, own summaries | +1.0 (2.0) | −0.9 (−1.1) | **+2.3 (3.8)** | +1.4 (1.2) |
-| Surprise (`sue`), same events | +1.2 (2.0) | +0.7 (0.7) | **+3.0 (7.7)** | +3.0 (2.9) |
+| Run | All events, 1 week | All events, 4 weeks | All events, 12 weeks | US large caps, 1 week | US large caps, 4 weeks | US large caps, 12 weeks |
+|---|---|---|---|---|---|---|
+| Gemini, own summaries | +1.3 (2.9) | +0.5 (0.5) | **−2.5 (−3.0)** | **+2.5 (4.3)** | +2.4 (2.7) | +1.1 (0.6) |
+| Gemini, Qwen's summaries | +1.3 (2.5) | −0.2 (−0.2) | **−4.3 (−3.2)** | +1.5 (2.7) | −0.2 (−0.2) | −4.9 (−2.3) |
+| Qwen, own summaries | +1.0 (2.0) | −0.9 (−1.1) | **−5.9 (−4.9)** | **+2.3 (3.8)** | +1.4 (1.2) | −2.3 (−1.2) |
+| Surprise (`sue`), same events | +1.2 (2.0) | +0.7 (0.7) | +0.5 (0.3) | **+3.0 (7.7)** | +3.0 (2.9) | **+6.9 (3.8)** |
 
-- **About as good as the surprise for all events, weaker in large caps.** The surprise rows are from Gemini's events; the other two event sets give the same values within 0.1pp at one week.
+- **About as good as the surprise for all events in week one, weaker in large caps.** The surprise rows are from Gemini's events; the other two event sets give the same values within 0.1pp at one and twelve weeks.
 - **Day 0 is larger but not tradable:** +8.7% to +9.6% for the LLM against +5.7% for the surprise (large caps +4.4% to +5.1% against +3.9%).
 - **Nothing reliable at four weeks.** Only Gemini on its own summaries is positive in large caps (+2.4%), and it falls to +0.6% (t 0.5) industry-neutral.
-- **The summary writer matters in large caps:** Gemini scoring Qwen's summaries earns +1.5%, against +2.3% to +2.5% for each model on its own summaries. For all events the three runs are within 0.4pp.
+- **At twelve weeks the LLM spread reverses for all events, and the bottom fifth drives it:** the LLM's worst-scored events beat VTI by 3.0% to 5.4% over the 12 weeks, its best-scored by −0.6% to +0.5%. The surprise is flat (+0.5%).
+- **In large caps the 12-week LLM spread is noise** (+1.1% to −4.9%, t 0.6 to −2.3), but **the surprise keeps drifting**: +6.9% (t 3.8), more than twice its one-week spread.
+- **The summary writer matters in large caps:** Gemini scoring Qwen's summaries earns +1.5% in week one, against +2.3% to +2.5% for each model on its own summaries. For all events the three runs are within 0.4pp.
 
 **Robustness.** The variants of section 7.4, plus size and the double sorts:
 
@@ -515,6 +518,22 @@ One week, % (t-statistic):
 - **Not an industry or size bet.** Across the four neutral variants one week stays between +0.9% and +1.8% for all events and between +1.4% and +3.2% for large caps.
 - **The LLM and the surprise carry different information.** Holding the surprise fixed, the LLM still earns about what it earns alone; holding the LLM fixed, so does the surprise. Neither absorbs the other, so a combined signal is the obvious next test. In large caps the surprise is the stronger of the two.
 
+Twelve weeks, % (t-statistic):
+
+| Variant | All events: Gemini, own | All events: Gemini, Qwen's | All events: Qwen, own | US large caps: Gemini, own | US large caps: Gemini, Qwen's | US large caps: Qwen, own |
+|---|---|---|---|---|---|---|
+| As in section 6 | −2.5 (−3.0) | −4.3 (−3.2) | −5.9 (−4.9) | +1.1 (0.6) | −4.9 (−2.3) | −2.3 (−1.2) |
+| Industry-neutral | −1.1 (−0.8) | −2.6 (−1.9) | −3.6 (−2.4) | +2.1 (1.0) | −2.6 (−1.4) | −1.5 (−0.7) |
+| Industry-adjusted | −1.2 (−1.3) | −2.8 (−2.5) | −4.3 (−2.9) | +2.4 (1.5) | −2.5 (−1.3) | +0.2 (0.1) |
+| Size-neutral | −2.2 (−2.3) | −4.7 (−3.9) | −5.3 (−4.2) | +0.6 (0.3) | −5.1 (−2.7) | −3.8 (−1.9) |
+| Size and industry neutral | −1.1 (−1.1) | −2.8 (−2.2) | −3.0 (−2.0) | +6.1 (1.7) | +1.8 (0.5) | +2.6 (0.7) |
+| LLM within surprise quintiles | −3.0 (−2.8) | −3.1 (−2.6) | −4.3 (−3.3) | −0.7 (−0.4) | −3.9 (−1.9) | −4.4 (−2.0) |
+| Surprise within LLM quintiles | +1.6 (1.1) | +1.5 (0.9) | +1.3 (0.9) | +7.3 (3.5) | +8.7 (4.2) | +6.1 (2.8) |
+
+- **Part of the 12-week reversal is an industry rotation.** For each model on its own summaries, the top fifth leans to business equipment (25% to 28% of the leg against 19% of events), whose reporters trailed VTI by 7.5% on average over their 12 weeks; the bottom fifth leans to manufacturing, chemicals, durables and non-durables, which beat VTI by 7.5% to 10.8%. Sorting inside industries cuts the spread by about 40% to 55%; sorting by size does not.
+- **The rest is not the surprise:** the reversal holds inside surprise quintiles (−3.0% to −4.3% for all events), while the surprise inside LLM quintiles is flat for all events and +6.1% to +8.7% in large caps.
+- **Checks:** for the two runs on Qwen's summaries, the all-events reversal holds without winsorizing, with buy-and-hold returns and without the week of Nov 10 (t −2.7 to −4.4). For Gemini on its own summaries it halves without winsorizing (−1.3%, t −1.2).
+
 **Transcript timing.** Without the 16:00 ET filter, one week is higher for all events and about unchanged for large caps, whose transcripts come out fast:
 
 | Run | All events: all scored → transcript by the close | US large caps: all scored → transcript by the close |
@@ -525,21 +544,21 @@ One week, % (t-statistic):
 
 Requiring the transcript cuts the all-events spread by 10% to 30%. A backtest that skips the filter overstates what is tradable.
 
-**Decay.** Two event-time views of the same fifths. First, the cumulative spread from day 1: in large caps most of the gain is in by day 5 (+2.5% and +2.3% for Gemini and Qwen on their own summaries), then it is flat for Gemini (+2.4% at day 20) and fades for Qwen (+1.4%). Second, what a holder gets over 20 days when entering with a signal that is already k days old, a rough proxy for a monthly rebalance, which holds signals of every age from 0 to about 20 days:
+**Decay.** Two event-time views of the same fifths. First, the cumulative spread from day 1: in large caps most of the gain is in by day 5 (+2.5% and +2.3% for Gemini and Qwen on their own summaries) and then fades, to +1.1% and −2.3% by day 60; for all events it peaks around day 5 to 10 and is negative by day 60. Second, what a holder gets over 20 days when entering with a signal that is already k days old, a rough proxy for a monthly rebalance, which holds signals of every age from 0 to about 20 days:
 
 | Signal age at entry (days held) | Large caps: Gemini, own | Large caps: Qwen, own | Large caps: surprise | All events: Gemini, own | All events: Qwen, own | All events: surprise |
 |---|---|---|---|---|---|---|
 | 0 (days 1–20) | +2.4 (2.7) | +1.4 (1.2) | +3.0 (2.9) | +0.5 (0.5) | −0.9 (−1.1) | +0.7 (0.7) |
-| 5 (days 6–25) | +0.3 (0.3) | −0.6 (−0.6) | +0.2 (0.2) | −1.0 (−1.4) | −2.1 (−3.0) | −0.0 (−0.1) |
-| 10 (days 11–30) | −0.8 (−0.9) | −1.5 (−1.4) | −0.0 (−0.0) | −1.2 (−2.3) | −1.7 (−2.1) | +0.4 (0.5) |
-| 15 (days 16–35) | −2.0 (−2.0) | −2.0 (−1.7) | +0.6 (0.9) | −0.8 (−1.0) | −0.4 (−0.4) | +0.4 (0.4) |
-| 20 (days 21–40) | −0.5 (−0.7) | −1.6 (−1.5) | +2.2 (2.5) | −0.5 (−0.6) | −0.4 (−0.6) | −0.2 (−0.3) |
+| 5 (days 6–25) | +0.3 (0.3) | −0.6 (−0.6) | +0.2 (0.2) | −1.0 (−1.4) | −2.1 (−3.0) | −0.1 (−0.1) |
+| 10 (days 11–30) | −0.5 (−0.6) | −1.3 (−1.1) | +0.3 (0.4) | −1.3 (−2.4) | −1.6 (−2.1) | +0.4 (0.4) |
+| 20 (days 21–40) | −0.8 (−0.9) | −2.3 (−1.9) | +2.2 (2.2) | −1.0 (−1.1) | −1.3 (−1.6) | −0.5 (−0.7) |
+| 40 (days 41–60) | −0.2 (−0.1) | −1.1 (−0.9) | +1.8 (1.1) | −1.9 (−2.5) | −3.5 (−3.9) | +0.6 (0.6) |
 
-Windows that run past 2026-01-30 drop the event, so N falls from 2,293 to 2,162 (all events) and from 581 to 541 (large caps) in the last row.
+Every event has 60 trading days of prices, so each row uses the full sample.
 
-- **For all events the LLM spread partly reverses.** Entering with a 10-day-old signal loses 1.2% to 1.7% over the next 20 days in all three runs (t −2.1 to −2.3; Gemini on Qwen's summaries −1.3%, t −2.1). It holds without the week of Nov 10, in which the runs disagree in sign, and with buy-and-hold returns; for Gemini on its own summaries it disappears without winsorizing.
-- **In large caps the sign is the same but not significant** (−0.8% to −1.5% at age 10, t −0.9 to −1.4).
-- **The surprise does not reverse,** and in large caps it keeps drifting: +5.1% (t 5.4) from day 1 to day 40, on the 540 early-enough reporters.
+- **For all events the spread turns negative after the first week.** Entering with a 10-day-old signal loses 1.3% to 1.6% over the next 20 days in all three runs (t −2.1 to −2.4), and days 41–60 lose another 1.9% to 3.5% for each model on its own summaries. The age-10 result holds without the week of Nov 10, in which the runs disagree in sign, and with buy-and-hold returns; for Gemini on its own summaries it disappears without winsorizing.
+- **In large caps the sign is the same but not significant** (−0.5% to −1.4% at age 10, t −0.6 to −1.4).
+- **The surprise does not reverse,** and in large caps it keeps drifting: +5.1% (t 4.9) from day 1 to day 40 and +6.9% (t 3.8) to day 60.
 - **Monthly rebalancing:** from about 5 days old the LLM signal earns about nothing or loses, so a monthly rebalance would capture little of it. With one quarter there are only three or four month-ends, so this is an event-time proxy, not a calendar-time test.
 
 **Long leg alone (for stage gate 2).** The mean abnormal return of the top fifth over one week, against VTI and against the average event in the same sample, %:
@@ -553,21 +572,23 @@ Windows that run past 2026-01-30 drop the event, so N falls from 2,293 to 2,162 
 
 - **For all events most of the spread is the short leg.** The top fifth trails VTI because the average reporting firm does (−0.83% over the week); it beats the average event by +0.3% to +0.4%.
 - **In US large caps the top fifth beats VTI** for each model on its own summaries (+0.7% to +0.9%).
-- **The benchmark decides the long-only answer.** The average reporting firm against VTI moves from −0.83% at one week to +1.44% at four weeks, a common swing of equal-weighted reporting firms against a cap-weighted index. Stage gate 2 needs the benchmark fixed first.
+- **The benchmark decides the long-only answer.** The average reporting firm against VTI moves from −0.83% at one week to +1.44% at four weeks and +2.48% at twelve, a common swing of equal-weighted reporting firms against a cap-weighted index. Stage gate 2 needs the benchmark fixed first.
 - **Break-even**, on section 6's four trades: 0.24% to 0.33% per trade for all events and 0.39% to 0.63% for large caps (the surprise: 0.31% and 0.76%).
 
 ```bash
-uv run python scripts/llm_long_short.py <folder with the cleaned files> out --require-available
-uv run python scripts/llm_decay.py <folder with the cleaned files> out
+uv run python scripts/llm_long_short.py <folder with the extended files> out --require-available
+uv run python scripts/llm_decay.py <folder with the extended files> out
 ```
 
-The folder holds section 6's three files plus `llm_merged_*.parquet` and `llm_scores.parquet` from the LLM step. `llm_long_short.py` writes `llm_long_short_results.csv`: every run, sample, variant and window, with the mean of each fifth (`Q1` to `Q5`), the sample mean (`all`) and `long_minus_all`. Without `--require-available` it uses every scored event. `llm_decay.py` writes `llm_decay.csv` (both views) and `llm_decay_by_week.csv` (the stale windows by reporting week).
+The folder holds the extended `events_baseline.parquet`, `prices_clean.parquet` and `market_ret.parquet` plus `llm_merged_*.parquet` and `llm_scores.parquet` from the LLM step. `llm_long_short.py` writes `llm_long_short_results.csv`: every run, sample, variant and window, with the mean of each fifth (`Q1` to `Q5`), the sample mean (`all`) and `long_minus_all`. Without `--require-available` it uses every scored event. `llm_decay.py` writes `llm_decay.csv` (both views) and `llm_decay_by_week.csv` (the stale windows by reporting week). On section 7.2's unextended panel the 1- and 4-week results are the same (apart from the one industry-adjusted event in the limits below), and 12-week windows cover only the 943 early reporters.
 
 **Limits**, on top of section 6's (one quarter, overlapping windows, gross returns, market-adjusted, equal weights):
 
-- **The 12-week window is not tested.** Only 943 events (349 large caps) have 60 trading days of prices, all early reporters. It needs the price panel extended to April 2026.
-- **Many tests on one quarter:** three runs, two samples, seven variants and several windows. The large-cap one-week spreads (t 3.8 to 4.3, Gemini and Qwen on their own summaries) clear t = 3; the all-events ones (t 2.0 to 2.9) do not.
+- **The 12-week t-statistics are the most optimistic.** The 52 event dates (45 for large caps) share most of the same 60 trading days, so the windows overlap far more than at one week.
+- **Market conditions in the 12-week windows are not examined.** The windows run from 2025-10-02 to 2026-03-30, and the industry tilt above suggests a sector rotation in that period drives part of the reversal; one quarter cannot separate a signal from a market episode.
+- **Many tests on one quarter:** three runs, two samples, seven variants and three windows. The large-cap one-week spreads of Gemini and Qwen on their own summaries (t 4.3 and 3.8) and the all-events 12-week reversal of the two runs on Qwen's summaries (t −3.2 and −4.9) clear |t| = 3. Gemini on its own summaries at 12 weeks is just short (t −2.99), and the all-events one-week spreads (t 2.0 to 2.9) do not.
 - **Neutral variants drop small cells**, so their samples differ: industry-neutral keeps 1,920 events (475 large caps), size and industry neutral 1,871 (276). Cells need 100 events for all events and 50 for large caps (50 and 25 for size and industry cells); these are command-line options.
+- **The industry-adjusted sample depends on the whole panel:** an event gets an industry benchmark only if its security is in the investable panel on some day, including after the event. The extension adds one such event (2,229 to 2,230 for Gemini), which moves the one-week spread by 0.01pp.
 - **Ten events are counted twice:** a second share class of the same company on the same day.
 - **Size tertiles use Compustat market cap**, which is wrong for some ADRs (section 6). The large-cap sample is limited to US-incorporated firms; the all-events size tertiles are not.
 

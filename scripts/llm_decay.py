@@ -3,7 +3,7 @@
 Two event-time views of the same fifths as llm_long_short.py (one pool, return against VTI, entry at the day-0
 close, transcript available by that close):
 
-    path    top minus bottom fifth, CAR from day 1 to day t, for t = 1 ... 40
+    path    top minus bottom fifth, CAR from day 1 to day t, for t = 1 ... 60
     stale   the 20-day CAR a holder gets when the signal is already k days old (days k+1 .. k+20). A monthly
             rebalance holds signals of every age from 0 to about 20 days, so this is a rough proxy for it
 
@@ -23,8 +23,8 @@ import pandas as pd
 from llm_long_short import load_prices, load_scores
 from llm_based_earnings_surprise_ntam.signals.long_short import _spread, event_paths, quantile, window_return
 
-PATH_DAYS = [1, 2, 3, 5, 10, 15, 20, 30, 40]
-STALE_AGES = [0, 5, 10, 15, 20]
+PATH_DAYS = [1, 2, 3, 5, 10, 15, 20, 30, 40, 60]
+STALE_AGES = [0, 5, 10, 15, 20, 40]
 
 
 def spread(stock, mkt, q, dates, a, b):
