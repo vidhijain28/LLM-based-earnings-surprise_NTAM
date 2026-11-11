@@ -274,11 +274,12 @@ Each job gets one Quadro RTX 6000 (24 GB), 4 CPUs, 32 GB of memory and up to 6 h
 
 ### 8.5 The Q4 2025 run
 
-- **Calls:** all 2,584 in-sample calls, summarized and then scored on the summaries with
-  `qwen3:30b-a3b-instruct-2507-q4_K_M`. No failed calls.
+- **Calls:** every one of the 2,584 in-sample calls has a summary and a score, from
+  `qwen3:30b-a3b-instruct-2507-q4_K_M` (scored on the summaries). No failed calls.
 - **Time:** 4 jobs of 2 h 08 min to 2 h 24 min, one Quadro RTX 6000 each. A summary took a median 11 s, a score 1 s.
-- **Summaries:** 2,529 of 2,584 (98%) in one round. Median 206 words, 32 times shorter than the transcript
-  (target: 28 times, at least 150 words).
+- **Summaries:** all 2,584 written. 2,529 (98%) were short enough on the first try; the other 55 were too long and
+  got the second "shorten" round. Median 206 words, 32 times shorter than the transcript (target: 28 times, at
+  least 150 words).
 - **Day-0 R²** (`llm_eval`, N = 2,584): surprise alone 4.7%, LLM alone 7.2%, both 10.2%. With both in the
   regression the LLM score has a t-statistic of 12.5 (robust standard errors). Its correlation with the surprise
   rank is 0.17, so it carries information the surprise does not.
