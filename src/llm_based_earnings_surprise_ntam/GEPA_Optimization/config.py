@@ -1,6 +1,6 @@
 """optimize.yaml: load it, open a run folder, and print the shell settings run_optimize.sh needs.
 
-    python -m llm_based_earnings_surprise_ntam.optimize.config --shell optimize.yaml   # used by run_optimize.sh
+    python -m llm_based_earnings_surprise_ntam.GEPA_Optimization.config --shell optimize.yaml   # used by run_optimize.sh
 """
 import argparse
 import json

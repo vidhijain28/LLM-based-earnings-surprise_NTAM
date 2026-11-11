@@ -1,6 +1,6 @@
 """Before the real runs: re-score a few calls with the seed prompt and compare with the data file's predictions.
 
-    python -m llm_based_earnings_surprise_ntam.optimize.check [--config optimize.yaml]
+    python -m llm_based_earnings_surprise_ntam.GEPA_Optimization.check [--config optimize.yaml]
 
 The file's `prediction` column came from the team's Midway run (same model and prompt, but its own context size and
 batching). If this setup reproduces those numbers, the file's seed predictions are a fair "before" for the

@@ -1,6 +1,6 @@
 """Continuous GEPA: before each reporting week, re-optimize on every call announced earlier, then score that week.
 
-    python -m llm_based_earnings_surprise_ntam.optimize.continuous [--config optimize.yaml] [--run NAME]
+    python -m llm_based_earnings_surprise_ntam.GEPA_Optimization.continuous [--config optimize.yaml] [--run NAME]
 
 Refit at the start (Monday) of each week once `burn_in` calls are known. A refit uses only calls with
 event_date < that Monday: targets rebuilt inside that window, GEPA's selection set = its newest calls, and a share of

@@ -1,6 +1,6 @@
 """Static GEPA (the paper's setup): optimize the prompt on the early half of the quarter, report on the late half.
 
-    python -m llm_based_earnings_surprise_ntam.optimize.static [--config optimize.yaml] [--run NAME]
+    python -m llm_based_earnings_surprise_ntam.GEPA_Optimization.static [--config optimize.yaml] [--run NAME]
 
 Early half = event_date <= the median event date. Inside it: targets from the early half only, GEPA's training set
 (older calls) and selection set (newest). The prompt GEPA picks then scores the late half, which it never saw, and
