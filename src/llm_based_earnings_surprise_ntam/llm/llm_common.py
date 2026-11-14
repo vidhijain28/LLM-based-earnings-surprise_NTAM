@@ -80,9 +80,14 @@ def select_events(df, n=None, seed=0, shard=None, nshards=1, ids=None):
     return df
 
 def shard_path(path, shard=None):
-    """llm_scores.parquet -> llm_scores_shard2.parquet for job 2."""
+    """llm_scores.parquet -> llm_scores_shard2.parquet for job 2. Inside a Slurm job the job number is added
+    (llm_scores_shard2_j123456.parquet), so jobs running at the same time (e.g. two prompt variants) never write
+    to the same file. load_all and llm_combine pick up every shard file."""
     path = Path(path)
-    return path if shard is None else path.with_name(f"{path.stem}_shard{shard}{path.suffix}")
+    if shard is None:
+        return path
+    job = os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID")
+    return path.with_name(f"{path.stem}_shard{shard}{f'_j{job}' if job else ''}{path.suffix}")
 
 def load_done(path):
     return pd.read_parquet(path) if Path(path).exists() else pd.DataFrame()

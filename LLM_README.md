@@ -105,21 +105,31 @@ after a pipeline change) unless you pass `--force`.
 | Option | What it does |
 |---|---|
 | `--ids` | score only the calls in `dev300.csv` (or `--ids other.csv`: any csv with a `transcriptid` column) |
-| `--variant NAME` | a label for the experiment, saved in the `variant` column (default `base`) |
+| `--variant NAME` | which prompt to score with (`PROMPTS` in `llm_score.py`), saved in the `variant` column (default `base`) |
 | `--temperature T` | sampling temperature (default 0) |
 | `--samples N` | score each call N times; `prediction` is the average, `predictions` and `reasons_all` keep every run, `prediction_sd` their spread. Run k uses seed k, so reruns give the same draws |
 
 ```bash
 M=llm_based_earnings_surprise_ntam.llm
-uv run python -m $M.llm_score --ids --variant recurring_focus                 # after editing the prompt
+uv run python -m $M.llm_score --ids --variant recurring_focus
 uv run python -m $M.llm_score --ids --variant base --temperature 0.7 --samples 5
 uv run python -m $M.llm_eval --ids                                           # every run, on the same 300 calls
 ```
 
 - A **run** is model x source x variant x temperature x samples. Calls already scored by the same run are skipped,
   so a new variant name (or temperature, or sample count) always starts fresh.
-- `--variant` is only a label: change the prompt in `llm_score.py` first, then score with a new name. Use a new
-  name for every prompt version, or the old scores are kept and the calls are skipped.
+- **Prompt variants** (`PROMPTS` in `llm_score.py`), each the base prompt plus one change, so each idea is measured
+  on its own:
+
+  | Variant | Change to the base prompt |
+  |---|---|
+  | `base` | none: the prompt of the full Q4 2025 run. Don't edit it, its 2,584 scores are reused |
+  | `recurring_focus` | a paragraph telling the model to separate recurring, core results from one-time items |
+  | `reporting_date` | adds how many days after the fiscal quarter end the company reported (IBES `anndats` - `pends`; median 35, known on the release day), the usual 4-6 weeks, and that late reporters have tended to have worse news. The summaries mask years, so without this the model doesn't see the timing |
+  | `temp` | the base prompt, under the label used for the temperature runs |
+
+  To test a new idea, add an entry to `PROMPTS`. Never edit a variant after scoring it: its scores are kept and
+  its calls skipped, so the file would mix two prompts under one name. Use a new name instead.
 - The base run (the full Q4 2025 scores) already covers the dev set; `llm_eval --ids` shows it next to every
   experiment. Dev-set baseline: R² 3.9% for the LLM alone, 4.2% for the surprise, 6.9% for both.
 - `llm_merge`, and so the backtest, only use the base run (variant `base`, temperature 0, one sample).
@@ -283,12 +293,16 @@ limit, node failure, cancelled), submit `run_llm.sh` again: calls already done a
 `llm_summaries_test.parquet` / `llm_scores_test.parquet`, so the real files are not touched. Combine and evaluate
 with the same tag: `LLM_TAG=test uv run python -m llm_based_earnings_surprise_ntam.llm.llm_combine`.
 
-**Dev-set experiments** (section 4b). Make the dev set once on Midway (same 300 calls as on a laptop), then:
+**Dev-set experiments** (section 4b). Make the dev set once on Midway (same 300 calls as on a laptop), then
+submit one job per prompt variant; they can run at the same time (each job writes its own shard files,
+`llm_scores_shard0_j<job>.parquet`):
 ```bash
 uv run python -m llm_based_earnings_surprise_ntam.llm.llm_devset
-IDS=data/processed/dev300.csv VARIANT=t07 TEMPERATURE=0.7 SAMPLES=5 sbatch run_llm.sh
-# after editing the prompt in llm_score.py:
-IDS=data/processed/dev300.csv VARIANT=recurring_focus sbatch run_llm.sh
+for V in recurring_focus reporting_date; do
+  NSHARDS=1 IDS=data/processed/dev300.csv VARIANT=$V sbatch --array=0 --job-name=llm-$V run_llm.sh
+done
+# temperature: the base prompt, sampled
+IDS=data/processed/dev300.csv TEMPERATURE=0.7 SAMPLES=5 NSHARDS=1 sbatch --array=0 run_llm.sh
 ```
 Then `llm_combine` as usual and `uv run python -m llm_based_earnings_surprise_ntam.llm.llm_eval --ids` to compare
 every run on the 300 calls. The summaries already cover the dev set, so only the scorer runs: about 1 s per
@@ -306,7 +320,7 @@ Set before `sbatch`, e.g. `LLM_MODEL=qwen3:8b sbatch run_llm.sh`. No code change
 | `NSHARDS` | `4` | number of jobs the calls are split into; change `--array` to match: `NSHARDS=8 sbatch --array=0-7 run_llm.sh` |
 | `PILOT` | not set | test on this many calls in total |
 | `IDS` | not set | only the calls in this csv, e.g. `data/processed/dev300.csv` (section 4b) |
-| `VARIANT` | `base` | experiment name, saved in the `variant` column |
+| `VARIANT` | `base` | prompt variant (`PROMPTS` in `llm_score.py`: `base`, `recurring_focus`, `reporting_date`), saved in the `variant` column |
 | `TEMPERATURE` | `0` | sampling temperature for the scorer |
 | `SAMPLES` | `1` | score each call this many times; saves each run and the average |
 | `LLM_TAG` | not set | write to `llm_*_<tag>.parquet`, so tests stay out of the real results |

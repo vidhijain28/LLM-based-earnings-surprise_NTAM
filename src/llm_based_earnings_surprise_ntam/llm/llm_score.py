@@ -10,8 +10,9 @@ On Midway, run_llm.sh splits the calls across GPU jobs with --shard / --nshards.
 Prompt experiments on the dev set (llm_devset; LLM_README.md section 4b):
   uv run python -m llm_based_earnings_surprise_ntam.llm.llm_score --ids --variant base                  # dev300.csv
   uv run python -m llm_based_earnings_surprise_ntam.llm.llm_score --ids --variant base --temperature 0.7 --samples 5
---variant is a label saved in the `variant` column. --samples N scores each call N times (seed 0..N-1, so it is
-reproducible): `prediction` is the average, `predictions` / `reasons_all` keep every run.
+--variant picks the prompt from PROMPTS below and is saved in the `variant` column. --samples N scores each call
+N times (seed 0..N-1, so it is reproducible): `prediction` is the average, `predictions` / `reasons_all` keep
+every run.
 A run is model x source x variant x temperature x samples; calls already scored by the same run are skipped.
 """
 import argparse, json, statistics, time
@@ -50,7 +51,44 @@ Earnings call:
 {text}
 </call>"""
 
-def score(text, retries=3, model=MODEL, temperature=0.0, seed=None):
+# --- Prompt variants for dev-set experiments (LLM_README.md section 4b) --------------------------------------
+# `--variant NAME` scores with PROMPTS[NAME]. "base" is the prompt of the full Q4 2025 run: don't edit it (its
+# 2,584 scores are reused). A new variant = base + one change, so each idea is measured on its own.
+
+RECURRING_FOCUS = """Focus on the quality of earnings. Separate results from the recurring, core business
+(organic revenue growth, margins excluding one-time items, guidance for the ongoing business) from one-time
+items (asset sales, tax benefits, impairments, restructuring, litigation, calendar or FX effects, pull-forward
+of demand). Markets reward beats and guidance raises that come from recurring operations and discount those
+that come from one-time items; a miss caused only by a one-time charge matters less than a miss in the core
+business.
+
+"""
+
+REPORTING_DATE = """Reporting timing: the company released these results {lag_days} days after its fiscal
+quarter ended. US companies usually report about 4 to 6 weeks after the quarter ends. Historically, companies
+that report later than usual have tended to have worse news, and early reporters better news.
+
+"""
+
+def _add_before(template, anchor, text):
+    assert template.count(anchor) == 1, anchor
+    return template.replace(anchor, text + anchor)
+
+PROMPTS = {
+    "base": USER_TEMPLATE,
+    "recurring_focus": _add_before(USER_TEMPLATE, "Steps:", RECURRING_FOCUS),
+    "reporting_date": _add_before(USER_TEMPLATE, "Earnings call:\n<call>", REPORTING_DATE),
+    "temp": USER_TEMPLATE,   # label used for the temperature runs (base prompt)
+}
+
+def prompt_fields(r):
+    """Per-call values the variant prompts can use: {lag_days} = release date (IBES anndats) minus fiscal
+    quarter end (pends), known on the release day."""
+    lag = (r.anndats - r.pends).days if pd.notna(r.anndats) and pd.notna(r.pends) else "an unknown number of"
+    return {"lag_days": lag}
+
+def score(text, retries=3, model=MODEL, temperature=0.0, seed=None, template=USER_TEMPLATE, fields=None):
+    content = template.format(text=text, **(fields or {}))
     options = {"temperature": temperature, "num_ctx": NUM_CTX}
     if seed is not None:
         options["seed"] = seed
@@ -59,7 +97,7 @@ def score(text, retries=3, model=MODEL, temperature=0.0, seed=None):
             resp = ollama.chat(
                 model=model, think=False, format="json",
                 messages=[{"role": "system", "content": SYSTEM},
-                          {"role": "user", "content": USER_TEMPLATE.format(text=text)}],
+                          {"role": "user", "content": content}],
                 options=options,
             )
             raw = clean(resp["message"]["content"])
@@ -71,10 +109,11 @@ def score(text, retries=3, model=MODEL, temperature=0.0, seed=None):
             time.sleep(2 ** attempt)
     return {"prediction": None, "reasons": ["failed"]}
 
-def score_samples(text, model, temperature, samples):
+def score_samples(text, model, temperature, samples, template=USER_TEMPLATE, fields=None):
     """Score one call `samples` times. Returns (average prediction or None, each run's prediction, each run's
     reasons). At temperature > 0 run k uses seed k, so a rerun gives the same draws."""
-    runs = [score(text, model=model, temperature=temperature, seed=k if temperature > 0 else None)
+    runs = [score(text, model=model, temperature=temperature, seed=k if temperature > 0 else None,
+                  template=template, fields=fields)
             for k in range(samples)]
     preds = [r.get("prediction") for r in runs]
     ok = [p for p in preds if p is not None]
@@ -88,6 +127,8 @@ def run(merged=MERGED, summaries=SUMMARIES, out=SCORES, model=MODEL, source=SOUR
     With shard, only this job's share is done and written to the job's own shard file."""
     if source not in SOURCES:
         raise SystemExit(f"source must be one of {SOURCES}, got {source!r}")
+    if variant not in PROMPTS:
+        raise SystemExit(f"unknown --variant {variant!r}; prompts in llm_score.py: {', '.join(PROMPTS)}")
     if samples < 1:
         raise SystemExit("--samples must be at least 1")
     if samples > 1 and temperature == 0:
@@ -119,7 +160,8 @@ def run(merged=MERGED, summaries=SUMMARIES, out=SCORES, model=MODEL, source=SOUR
         # mask summaries too: the model sometimes writes the year or name back in
         text = anonymize(raw, r.companyname, r.ticker)
         t0 = time.time()
-        pred, preds, reasons = score_samples(text, model, temperature, samples)
+        pred, preds, reasons = score_samples(text, model, temperature, samples,
+                                             template=PROMPTS[variant], fields=prompt_fields(r))
         ok = [p for p in preds if p is not None]
         first = next((rs for p, rs in zip(preds, reasons) if p is not None), reasons[0])
         rows.append({"transcriptid": r.transcriptid, "keydevid": r.keydevid,
@@ -147,8 +189,8 @@ def main():
     ap.add_argument("--model", default=MODEL, help="Ollama model (default: llm.model in config.yaml)")
     ap.add_argument("--shard", type=int, help="this job's number (0 .. nshards-1)")
     ap.add_argument("--nshards", type=int, default=1)
-    ap.add_argument("--variant", default=RUN_DEFAULTS["variant"],
-                    help="name of this experiment, saved in the `variant` column (default: base)")
+    ap.add_argument("--variant", default=RUN_DEFAULTS["variant"], choices=list(PROMPTS),
+                    help="prompt to score with (PROMPTS in llm_score.py), saved in the `variant` column")
     ap.add_argument("--ids", nargs="?", const=DEV_IDS, metavar="CSV",
                     help=f"only score the calls in this csv (`--ids` alone: {DEV_IDS.name})")
     ap.add_argument("--temperature", type=float, default=RUN_DEFAULTS["temperature"])

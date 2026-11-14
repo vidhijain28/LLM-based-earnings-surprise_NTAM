@@ -52,7 +52,7 @@ fi
 grep -i "inference compute" "$OLOG"
 
 # dev-set experiments (LLM_README.md section 4b), all optional:
-#   IDS=data/processed/dev300.csv  only these calls      VARIANT=name  label saved in the `variant` column
+#   IDS=data/processed/dev300.csv  only these calls      VARIANT=name  prompt from PROMPTS in llm_score.py
 #   TEMPERATURE=0.7                sampling temperature  SAMPLES=5     score each call 5 times, save each + average
 if [ -n "${IDS:-}" ] && [ ! -f "$IDS" ]; then
     echo "ERROR: $IDS not found; make it with: uv run python -m llm_based_earnings_surprise_ntam.llm.llm_devset"
