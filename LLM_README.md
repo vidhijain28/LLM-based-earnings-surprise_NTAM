@@ -87,6 +87,46 @@ R² of the surprise alone, the LLM prediction alone, and both together.
 
 ---
 
+## 4b. Prompt experiments on the dev set
+
+Experiments (prompt changes, temperature) are tuned on a **dev set**: 300 random in-sample calls from the early
+half of the quarter (seed 0). The late half is the hold-out for the final test: don't score or look at it until then.
+
+```bash
+uv run python -m llm_based_earnings_surprise_ntam.llm.llm_devset     # once -> data/processed/dev300.csv
+```
+
+For Q4 2025 the dev pool is the 1,443 calls up to 2025-11-05; the 1,141 later calls are the hold-out. The pick is
+deterministic, so running it on Midway gives the same file. It refuses to overwrite a different dev set (e.g.
+after a pipeline change) unless you pass `--force`.
+
+`llm_score` options for experiments:
+
+| Option | What it does |
+|---|---|
+| `--ids` | score only the calls in `dev300.csv` (or `--ids other.csv`: any csv with a `transcriptid` column) |
+| `--variant NAME` | a label for the experiment, saved in the `variant` column (default `base`) |
+| `--temperature T` | sampling temperature (default 0) |
+| `--samples N` | score each call N times; `prediction` is the average, `predictions` and `reasons_all` keep every run, `prediction_sd` their spread. Run k uses seed k, so reruns give the same draws |
+
+```bash
+M=llm_based_earnings_surprise_ntam.llm
+uv run python -m $M.llm_score --ids --variant recurring_focus                 # after editing the prompt
+uv run python -m $M.llm_score --ids --variant base --temperature 0.7 --samples 5
+uv run python -m $M.llm_eval --ids                                           # every run, on the same 300 calls
+```
+
+- A **run** is model x source x variant x temperature x samples. Calls already scored by the same run are skipped,
+  so a new variant name (or temperature, or sample count) always starts fresh.
+- `--variant` is only a label: change the prompt in `llm_score.py` first, then score with a new name. Use a new
+  name for every prompt version, or the old scores are kept and the calls are skipped.
+- The base run (the full Q4 2025 scores) already covers the dev set; `llm_eval --ids` shows it next to every
+  experiment. Dev-set baseline: R² 3.9% for the LLM alone, 4.2% for the surprise, 6.9% for both.
+- `llm_merge`, and so the backtest, only use the base run (variant `base`, temperature 0, one sample).
+- With `--samples`, the time per call multiplies by N.
+
+---
+
 ## 5. Anonymization
 
 Before the LLM sees a transcript, `anonymize()` in `llm/llm_common.py` hides who the call is about. This lowers the chance that
@@ -131,7 +171,7 @@ Both files are in `data/processed/` (not tracked by git) and join to the pipelin
 | File | One row per | Columns |
 |---|---|---|
 | `llm_summaries.parquet` | call | `transcriptid, summary, words_in, words_out, passes, model, seconds` (`passes`: 2 when the shortening round was needed) |
-| `llm_scores.parquet` | call x source x model | `transcriptid, keydevid, ticker, event_date, prediction, reasons, model, source, seconds` |
+| `llm_scores.parquet` | call x run (model, source, variant, temperature, samples) | `transcriptid, keydevid, ticker, event_date, prediction, reasons, model, source, seconds`; experiment rows also have `variant, temperature, samples, predictions, reasons_all, prediction_sd` (section 4b) |
 | `llm_merged_<tag>.parquet` | in-sample call | the pipeline's columns (no transcript text) + summary + the configured run's `prediction` (`llm_merge`) |
 | `llm_eval_<tag>.txt` | | day-0 R² of the surprise, the LLM score and both, per model and source (`llm_eval`) |
 
@@ -243,6 +283,18 @@ limit, node failure, cancelled), submit `run_llm.sh` again: calls already done a
 `llm_summaries_test.parquet` / `llm_scores_test.parquet`, so the real files are not touched. Combine and evaluate
 with the same tag: `LLM_TAG=test uv run python -m llm_based_earnings_surprise_ntam.llm.llm_combine`.
 
+**Dev-set experiments** (section 4b). Make the dev set once on Midway (same 300 calls as on a laptop), then:
+```bash
+uv run python -m llm_based_earnings_surprise_ntam.llm.llm_devset
+IDS=data/processed/dev300.csv VARIANT=t07 TEMPERATURE=0.7 SAMPLES=5 sbatch run_llm.sh
+# after editing the prompt in llm_score.py:
+IDS=data/processed/dev300.csv VARIANT=recurring_focus sbatch run_llm.sh
+```
+Then `llm_combine` as usual and `uv run python -m llm_based_earnings_surprise_ntam.llm.llm_eval --ids` to compare
+every run on the 300 calls. The summaries already cover the dev set, so only the scorer runs: about 1 s per
+score on the RTX 6000 (section 8.5), so 300 calls take about 5 minutes per sample on one GPU. One job is enough
+and waits less for a GPU: `NSHARDS=1 IDS=... sbatch --array=0 run_llm.sh`.
+
 ### 8.3 Settings
 
 Set before `sbatch`, e.g. `LLM_MODEL=qwen3:8b sbatch run_llm.sh`. No code changes needed.
@@ -253,6 +305,10 @@ Set before `sbatch`, e.g. `LLM_MODEL=qwen3:8b sbatch run_llm.sh`. No code change
 | `LLM_NUM_CTX` | `24576` | context window in tokens, set for the RTX 6000's 24 GB (laptop default: 32768) |
 | `NSHARDS` | `4` | number of jobs the calls are split into; change `--array` to match: `NSHARDS=8 sbatch --array=0-7 run_llm.sh` |
 | `PILOT` | not set | test on this many calls in total |
+| `IDS` | not set | only the calls in this csv, e.g. `data/processed/dev300.csv` (section 4b) |
+| `VARIANT` | `base` | experiment name, saved in the `variant` column |
+| `TEMPERATURE` | `0` | sampling temperature for the scorer |
+| `SAMPLES` | `1` | score each call this many times; saves each run and the average |
 | `LLM_TAG` | not set | write to `llm_*_<tag>.parquet`, so tests stay out of the real results |
 | `NTAM` | `/project/finm36000/ntam_llm` | shared folder with Ollama, the model files and the repo |
 

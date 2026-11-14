@@ -21,6 +21,28 @@ MODEL = os.environ.get("LLM_MODEL") or _LLM.get("model", "qwen3:8b")
 SOURCE = _LLM.get("source", "summary")
 NUM_CTX = int(os.environ.get("LLM_NUM_CTX") or _LLM.get("num_ctx", 32768))   # Midway RTX 6000: 24576
 
+# Dev set for prompt experiments (llm_devset): random calls from the early half of the quarter only
+DEV_IDS = MERGED.parent / "dev300.csv"
+
+# One scoring run = model x source x variant x temperature x samples. Rows written before the last three
+# existed are the base run: variant "base", temperature 0, one sample.
+RUN_KEYS = ["model", "source", "variant", "temperature", "samples"]
+RUN_DEFAULTS = {"variant": "base", "temperature": 0.0, "samples": 1}
+
+def with_run_defaults(scores):
+    """Fill variant / temperature / samples on score rows that predate them."""
+    scores = scores.copy()
+    for col, value in RUN_DEFAULTS.items():
+        scores[col] = scores[col].fillna(value) if col in scores else value
+    return scores.astype({"temperature": float, "samples": int}) if len(scores) else scores
+
+def read_ids(path):
+    """transcriptids listed in a csv with a `transcriptid` column (e.g. dev300.csv)."""
+    path = Path(path)
+    if not path.exists():
+        raise SystemExit(f"{path} not found: make it with `uv run python -m llm_based_earnings_surprise_ntam.llm.llm_devset`")
+    return set(pd.read_csv(path, usecols=["transcriptid"])["transcriptid"].astype("int64"))
+
 def require_ollama(model):
     """Fail early, with a clear message, when the Ollama server or the model is not there."""
     import ollama
@@ -44,13 +66,15 @@ def clean(raw):
     out = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.S)
     return out.split("</think>")[-1].strip()
 
-def select_events(df, n=None, seed=0, shard=None, nshards=1):
+def select_events(df, n=None, seed=0, shard=None, nshards=1, ids=None):
     """In-sample events; with n, a fixed random pilot from the first half of the quarter;
-    with shard, only this job's share of the calls."""
+    with ids, only those transcriptids; with shard, only this job's share of the calls."""
     df = df[df["in_sample"]].copy()
     if n:
         early = df[df["event_date"] <= df["event_date"].median()]
         df = early.sample(n=min(n, len(early)), random_state=seed)
+    if ids is not None:
+        df = df[df["transcriptid"].astype("int64").isin(ids)]
     if shard is not None:
         df = df[df["transcriptid"].astype("int64") % nshards == shard]
     return df

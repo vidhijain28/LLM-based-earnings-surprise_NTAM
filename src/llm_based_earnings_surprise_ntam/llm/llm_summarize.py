@@ -11,8 +11,8 @@ import argparse, re, time
 import pandas as pd
 import ollama
 
-from .llm_common import (MERGED, SUMMARIES, MODEL, NUM_CTX, anonymize, clean, require_ollama,
-                         select_events, load_done, load_all, shard_path, save_append)
+from .llm_common import (MERGED, SUMMARIES, MODEL, NUM_CTX, DEV_IDS, anonymize, clean, require_ollama,
+                         select_events, load_done, load_all, shard_path, save_append, read_ids)
 
 COMPRESSION = 28
 MIN_WORDS = 150
@@ -120,11 +120,13 @@ def summarize(transcript, retries=3, model=MODEL):
             time.sleep(2 ** attempt)
     return None, 0
 
-def run(merged=MERGED, out=SUMMARIES, model=MODEL, n=None, shard=None, nshards=1):
+def run(merged=MERGED, out=SUMMARIES, model=MODEL, n=None, shard=None, nshards=1, ids=None):
     """Summarize the in-sample calls not yet summarized (all of them, or a pilot of n). Resumable.
     One summary per call: calls already in `out` or its shard files are skipped, whatever the model.
+    With ids (a csv such as dev300.csv), only those calls.
     With shard, only this job's share is done and written to the job's own shard file."""
-    df = select_events(pd.read_parquet(merged), n, shard=shard, nshards=nshards)
+    df = select_events(pd.read_parquet(merged), n, shard=shard, nshards=nshards,
+                       ids=None if ids is None else read_ids(ids))
     seen = load_all(out)
     if not seen.empty:
         df = df[~df["transcriptid"].isin(seen["transcriptid"])]
@@ -161,8 +163,12 @@ def main():
     ap.add_argument("--model", default=MODEL, help="Ollama model (default: llm.model in config.yaml)")
     ap.add_argument("--shard", type=int, help="this job's number (0 .. nshards-1)")
     ap.add_argument("--nshards", type=int, default=1)
+    ap.add_argument("--ids", nargs="?", const=DEV_IDS, metavar="CSV",
+                    help=f"only summarize the calls in this csv (`--ids` alone: {DEV_IDS.name})")
     args = ap.parse_args()
-    run(model=args.model, n=args.n, shard=args.shard, nshards=args.nshards)
+    if args.ids is not None and args.n:
+        ap.error("use --ids or --n, not both")
+    run(model=args.model, n=args.n, shard=args.shard, nshards=args.nshards, ids=args.ids)
 
 if __name__ == "__main__":
     main()

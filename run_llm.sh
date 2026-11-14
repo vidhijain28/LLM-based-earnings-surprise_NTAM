@@ -51,6 +51,16 @@ if ! grep -i "inference compute" "$OLOG" | grep -qi "library=cuda"; then
 fi
 grep -i "inference compute" "$OLOG"
 
+# dev-set experiments (LLM_README.md section 4b), all optional:
+#   IDS=data/processed/dev300.csv  only these calls      VARIANT=name  label saved in the `variant` column
+#   TEMPERATURE=0.7                sampling temperature  SAMPLES=5     score each call 5 times, save each + average
+if [ -n "${IDS:-}" ] && [ ! -f "$IDS" ]; then
+    echo "ERROR: $IDS not found; make it with: uv run python -m llm_based_earnings_surprise_ntam.llm.llm_devset"
+    exit 1
+fi
 M=llm_based_earnings_surprise_ntam.llm
-uv run --no-sync python -m $M.llm_summarize --shard $SHARD --nshards $NSHARDS ${PILOT:+--n $PILOT}
-uv run --no-sync python -m $M.llm_score --source summary --shard $SHARD --nshards $NSHARDS ${PILOT:+--n $PILOT}
+uv run --no-sync python -m $M.llm_summarize --shard $SHARD --nshards $NSHARDS ${PILOT:+--n $PILOT} \
+    ${IDS:+--ids $IDS}
+uv run --no-sync python -m $M.llm_score --source summary --shard $SHARD --nshards $NSHARDS ${PILOT:+--n $PILOT} \
+    ${IDS:+--ids $IDS} ${VARIANT:+--variant $VARIANT} ${TEMPERATURE:+--temperature $TEMPERATURE} \
+    ${SAMPLES:+--samples $SAMPLES}
