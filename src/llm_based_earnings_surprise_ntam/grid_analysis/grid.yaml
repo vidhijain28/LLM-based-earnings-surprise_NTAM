@@ -1,0 +1,51 @@
+# The grid of trading settings on the LLM runs of llm_runs.yaml (Q4 2025, US). Read by pull.py, grid.py and
+# report.py. Paths are relative to the repo root; everything under data/ is git-ignored (licensed WRDS data).
+
+paths:
+  calls: data/grid_analysis/llm_merged_20250101_20251231_us.parquet   # the merged file (scores of version 0 inside)
+  scores: data/grid_analysis/llm_runs        # scores_A/B/C/P.parquet from llm_runs (collect.py)
+  raw: data/grid_analysis/wrds               # pull.py writes the untouched WRDS downloads here
+  out: data/grid_analysis/grid               # grid.py writes the results here
+  report: data/grid_analysis/grid/grid_report.html
+
+calls:
+  quarter: 2025Q4
+  transcript_by_close: true      # trade a call only if its transcript existed by 16:00 ET on the event date
+
+pull:
+  prices_start: "2024-09-01"     # 12 months of volume before the first Q4 call, for the attention ratio
+  prices_end: "2026-06-30"       # covers the 60-day holds and the next announcements of the Q4 calls
+  market_tic: VTI                # market return (Compustat security with this ticker)
+  ibes_start: "2025-10-01"       # I/B/E/S announcements searched for each call's next announcement
+
+rules:
+  min_calls: 100                 # point-in-time breakpoints: a day trades only once this many calls have come in
+  min_names: 30                  # a leg trades on a day only if it holds at least this many open names (Xiao's rule)
+  min_industry_calls: 20        # FF12-neutral: an industry with fewer calls so far is ranked in one pooled group
+  ties: midrank                  # equal signal values get the same rank (their mean rank)
+  attention_days: 252            # attention = day-0 dollar volume / mean dollar volume of the previous 252 days
+  attention_min_days: 126        # ... with at least this many of those days traded; otherwise no attention weight
+  attention_low_share: 0.3333333333   # lowest third of attention so far ...
+  attention_weight: 2.0               # ... gets this weight (others 1)
+  next_unknown_days: 63          # decay: hold this many trading days when the next announcement is not in I/B/E/S
+  annualize: 252
+
+# The grid: every combination of the levels below (4 x 2 x 2 x 2 x 6 x 2 x 2 = 768 configurations).
+grid:
+  version: ['0', A, B, C]        # scoring versions: '0' = `prediction` in the calls file; A/B/C = scores_<version>.parquet
+  signal: [llm, narrative]       # narrative = residual of the LLM rank on the SUE and day-0 return ranks
+  sort: {fifths: 5, tenths: 10}
+  industry: [none, ff12]
+  holding:
+    fixed_5:  {kind: fixed, days: 5}
+    fixed_20: {kind: fixed, days: 20}
+    fixed_60: {kind: fixed, days: 60}
+    decay_10: {kind: decay, half_life: 10}
+    decay_20: {kind: decay, half_life: 20}
+    decay_45: {kind: decay, half_life: 45}
+  attention: [none, low]
+  persistence: [none, weighted]  # weighted = (rank - 0.5) x persistence of run P
+
+permutations:
+  runs: 0                        # 0 = not run. Shuffles of the LLM outputs within each entry day, full grid each
+  seed: 0
