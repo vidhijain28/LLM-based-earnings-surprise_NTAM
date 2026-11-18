@@ -638,7 +638,7 @@ Writes `llm_industry_r2.csv`, one row per run and group, with the interval. Same
 |---|---|
 | Events | The pipeline's estimation sample (`in_sample`, step 6) for 2025, with an LLM score and both returns: **10,298** for Qwen (2,491 / 2,631 / 2,593 / 2,583 by quarter) |
 | Returns | **day 0:** `r_abn` (step 5). **t−1…t+1:** the stock's CRSP daily return minus VTI's, summed over the trading day before, the event date and the day after (`crsp.dsf_v2`, as in step 5). Same events in both windows |
-| Baseline | **The surprise (`sue`) for now.** CE is not in the pipeline yet and its definition is to be confirmed with NTAM; the script takes the baseline as a list, so it can be added without changing anything else |
+| Baseline | **The surprise (` our sue, also defined as ce`)**  the script takes the baseline as a list, so it can be added without changing anything else |
 | Regressions | Inside each quarter, the return, the baseline and the LLM score are turned into percentile ranks (as in step 6). R² base: return on the baseline; R² both: return on the baseline and the LLM score; ΔR² = R² both − R² base. Pooled: the four quarters stacked, ranks still within quarter |
 | Interval | Paired 99% bootstrap of ΔR², 1,000 resamples of events with replacement inside each quarter |
 | Adjusted R² | Reported next to ΔR²; with about 2,500 events a quarter and one added regressor it differs from ΔR² by at most 0.001 |
