@@ -1,17 +1,16 @@
 # Factor backtest: the earnings surprise and the LLM score as factors
 
 *Q4 2025 earnings announcements. NTAM project lab (UChicago FINM 36000). First prepared for the Nov 11, 2026 meeting,
-to answer the questions of Nov 9 and Nov 10. Updated for the Nov 18 meeting with the decay analyses that followed it,
-in sections 10–12: proposals #4 and #5 of Nov 17, the reply of Nov 11, and the questions in the meeting. Every number
-below comes from the backtest output; tables state their units.*
+to answer the questions of Nov 9 and Nov 10. Updated for the Nov 18 meeting with the decay follow-ups, in sections
+10–12. Every number below comes from the backtest output; tables state their units.*
 
 ## New on Nov 18
 
 | Question | Answer (Q4 2025) |
 |---|---|
-| What half-life does the IC decay curve give, and does it match the Nov 11 decay results? (#4) | **About 2.5 trading days for the LLM score** (95% interval 0.6 to 4.2), so 75% of its fitted IC comes in the first week, and its IC turns negative after it (days 21–60: −0.067, t −3.1). That matches Nov 11: the return comes in week one, then reverses. **SUE's half-life is about 2.8 days, but it isn't pinned down** (interval 0.3 to no upper bound). Both are far shorter than a 90-day horizon (section 10). |
-| A hard expiry at the next announcement? (#4) | Built in: each call is dropped the day before its company's next announcement (I/B/E/S dates, known for 99% of calls; median 69 trading days later). With half-lives of a few days it rarely binds. The LLM score also weakly predicts the reaction to that next announcement (IC +0.033, t +1.8); SUE doesn't (section 10). |
-| Positive vs. negative surprises? (#5) | **The LLM's week-one information is in the beats** (IC +0.091, t +3.3; misses +0.014), **and its reversal is in the misses.** SUE is the other way around: the size of a miss keeps predicting returns for about three months, while the size of a beat stops after about two. The bottom fifth's CAR over days 91–120 is positive for every signal, the direction proposal #5 expects, but no t-stat exceeds 1.5 (section 11). |
+| What half-life does the IC decay curve give, and does it match the Nov 11 decay results? | **About 2.5 trading days for the LLM score** (95% interval 0.6 to 4.2), so 75% of its fitted IC comes in the first week, and its IC turns negative after it (days 21–60: −0.067, t −3.1). That matches Nov 11: the return comes in week one, then reverses. **SUE's half-life is about 2.8 days, but it isn't pinned down** (interval 0.3 to no upper bound). Both are far shorter than a 90-day horizon (section 10). |
+| A hard expiry at the next announcement? | Built in: each call is dropped the day before its company's next announcement (I/B/E/S dates, known for 99% of calls; median 69 trading days later). With half-lives of a few days it rarely binds. The LLM score also weakly predicts the reaction to that next announcement (IC +0.033, t +1.8); SUE doesn't (section 10). |
+| Positive vs. negative surprises? | **The LLM's week-one information is in the beats** (IC +0.091, t +3.3; misses +0.014), **and its reversal is in the misses.** SUE is the other way around: the size of a miss keeps predicting returns for about three months, while the size of a beat stops after about two. The bottom fifth's CAR over days 91–120 is positive for every signal, which would fit a late reversal, but no t-stat exceeds 1.5 (section 11). |
 | Alpha-weighted, smoothed portfolios? | **SUE works with signal × capped-cap weights at every half-life,** and the LLM score doesn't at any (t ≤ 1.1). With half-lives of up to a week, the smoothed LLM books earn +15.8 to +30.8 bp a day on the busy reporting days, when the Nov 11 fifths trade (the fifths: +34.6), and −40.6 to +6.5 on the other days. So the LLM's week-one result sits in the busy weeks (section 12). |
 | Why is there a straight line at the end of the cumulative chart? | Those are days with no position, so the cumulative return can't move. They're now drawn dotted (section 4). |
 
@@ -60,6 +59,9 @@ stocks, NYSE breakpoints, and weights capped at the NYSE 80th percentile of mark
 | LLM (Gemini) | Gemini 2.5 Flash-Lite's 0–1 prediction of the stock reaction, scoring its own summary of the anonymized call (run through NTAM's OpenRouter key) | the calls |
 | LLM (Qwen) | Qwen3-30B, same task, run locally on the university cluster (a check on the Gemini run) | the calls |
 | LLM beyond SUE | The part of the LLM score that SUE doesn't explain: the residual from regressing rank(LLM) on rank(SUE) within each formation set | the calls |
+
+Our SUE is what Chiang et al. (2019) call CE, the consensus error: the surprise against analysts' forecasts. The
+time-series SUE of Bernard & Thomas (1990), built from the company's own past earnings, is a different measure.
 
 Q4 2025 is after both models' training cutoffs, which limits look-ahead. The three questions are the ones NTAM asked on Nov 10: how fast the signal decays, whether a monthly rebalance captures it, and whether conditioning on price momentum
 changes that. The tests follow the protocol NTAM sent the same day.
@@ -353,9 +355,8 @@ problem Hou, Xue and Zhang document.
 
 ## 10. IC decay and the half-life (new)
 
-*Proposal #4 (Nov 17): "Estimate the half-life from the IC decay curve. Check it matches your 11/12 decay
-framework", with a hard expiry at the next announcement instead of a fixed holding period. The IC as a measure of
-decay was also raised in the Nov 11 meeting.*
+*The question: estimate the half-life from the IC decay curve, check that it matches the Nov 11 decay results, and
+use a hard expiry at the next announcement instead of a fixed holding period.*
 
 <img src="ic_decay_chart.png" width="820" alt="Daily IC with the fitted exponential decay, and the summed IC">
 
@@ -409,7 +410,7 @@ By window, the same IC and the IC at the next announcement:
   81). With half-lives of 2–3 days, it rarely binds.
 - **The LLM score also weakly predicts the reaction to the next announcement:** IC +0.033 (t +1.8)
   for Gemini and +0.038 (t +2.0) for Qwen, over days −1 to +1 around it. SUE doesn't
-  (−0.015, t −0.6). Below t = 3, but relevant to proposal #3: whether the score predicts next
+  (−0.015, t −0.6). Below t = 3, but it bears on whether the score predicts next
   quarter's surprise.
 
 ---
@@ -418,8 +419,8 @@ By window, the same IC and the IC at the next announcement:
 
 ## 11. Positive and negative surprises (new)
 
-*Proposal #5 (Nov 17): treat positive and negative surprises separately, shortening the negative side's holding
-or fading it after day 90. Test: the IC by sign and horizon. Its hook: the bottom quintile reverses over days 90–120.*
+*The question: treat positive and negative surprises separately, shortening the negative side's holding or fading
+it after day 90. Test: the IC by sign and horizon. The hypothesis: the bottom quintile reverses over days 90–120.*
 
 <img src="ic_sign_chart.png" width="820" alt="Summed IC within positive and within negative surprises">
 
@@ -449,7 +450,7 @@ predicts returns among beats, and the same for misses. Returns run until the nex
   +0.087, t +3.8 on all events), then fades and turns negative after about two months
   (−0.90 by day 60). Within misses, the summed IC keeps rising to +1.81 by day 60
   (band +1.12 to +2.64): bigger misses keep drifting down for about three months.
-- **So the two sides do behave differently, as proposal #5 suggests, but differently for the two signals.** For the LLM
+- **So the two sides do behave differently, but differently for the two signals.** For the LLM
   score, the negative side is the one to shorten (after about two weeks). For SUE, it is the side that lasts.
 
 <img src="car_paths_chart.png" width="820" alt="CAR of the top and bottom fifths out to day 120">
@@ -466,7 +467,7 @@ The top and bottom fifths' mean CAR vs VTI out to day 120 (fifths as in section 
 | LLM beyond SUE | −1.34% (−1.8) | +1.35% (+1.2) | 289 / 273 |
 
 - **The bottom fifth's CAR over days 91–120 is positive for every signal** (+0.4%
-  to +1.4%), the direction proposal #5 expects, **but none is significant** (t ≤
+  to +1.4%), which would fit a late reversal, **but none is significant** (t ≤
   1.5). Only calls up to early November reach day 120, about 273–396
   per fifth.
 - **Both fifths drift up against VTI** over the quarter. Those are equal-weighted averages of mostly smaller companies
@@ -478,10 +479,10 @@ The top and bottom fifths' mean CAR vs VTI out to day 120 (fifths as in section 
 
 ## 12. Smoothed, signal-weighted portfolios (new)
 
-*The reply of Nov 11: because these signals are sparse at the company level, decile or quintile spreads have a
-limited cross-section, so use pure univariate factor-mimicking (alpha-weighted) long-shorts, and smooth the company
-signals exponentially with half-lives calibrated on the holding periods. Proposal #4: a hard expiry at the next
-announcement. The meeting: half-lives of a day, a month and a quarter.*
+*The suggestion: because these signals are sparse at the company level, decile or quintile spreads have a limited
+cross-section, so use pure univariate factor-mimicking (alpha-weighted) long-shorts, and smooth the company signals
+exponentially, with half-lives calibrated on the holding periods (a day, a month and a quarter) and a hard expiry at
+the next announcement.*
 
 ```
 s_i     = 2 × (the call's percentile among the NYSE announcements so far) − 1
@@ -584,12 +585,13 @@ Book sizes and turnover, signal weights:
 
 ## 14. Next steps
 
-- **More quarters (2025).** Every result above needs them. Sean has scored all four quarters of 2025 with Qwen; with
-  the prices and I/B/E/S for those quarters, everything here can be rerun. The WRDS data costs nothing; Gemini scoring
-  costs about $5 a quarter.
-- **The rest of the Nov 17 proposals for the factor work:** #8 (show it isn't momentum: residualize on 12-1
-  momentum and quality, then a spanning test against SUE and the factor stack), #6 (regime) and #7 (attention). #1–#2
-  need CE, which we'd like to confirm with NTAM.
+- **More quarters (2025).** Every result above needs them. Sean has scored all four quarters of 2025 with Qwen, and
+  Austin is adding Gemini scores for Q1–Q3 (about $5 a quarter). With the prices and I/B/E/S for those quarters,
+  everything here can be rerun; the WRDS data costs nothing.
+- **The LLM score next to CE:** Austin is building the time-series SUE, so we can test whether the LLM score still
+  predicts returns at 1, 3 and 6 months given CE (our SUE), the time-series SUE and the announcement CAR.
+- **The other follow-ups for the factor work:** show it isn't momentum (residualize on 12-1 momentum and quality,
+  then a spanning test against SUE and the factor stack), and the regime and attention splits.
 - **Robustness:** other cap levels for the capped weights, a buffer, and other portfolio sizes.
 - **The grid:** the choices tested here (half-life, expiry, weights, sign) are natural dimensions of the pre-registered
   grid that Luke is building.
