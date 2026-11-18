@@ -669,7 +669,6 @@ uv run python scripts/llm_ead_r2.py out --baseline sue ce --extra ce.parquet   #
 Reads the final dataset and the LLM files for the period in `config.yaml` (set to 2025-01-01 to 2025-12-31 for the table above): `llm_merged_<period>.parquet` for Sean's Qwen run and every run in `llm_scores.parquet` with at least 500 calls. Pulls CRSP daily returns once and caches them in `data/interim/crsp_daily_<period>.parquet`. Writes `out/llm_ead_r2_results.csv`, one row per run, window and quarter (plus pooled), with the interval. Quarters where a run has fewer than 1,000 events (a run still in progress) are left out (`--min-quarter`).
 
 **Limits:**
-- **No CE yet,** so this answers "LLM + surprise vs. surprise", not NTAM's "LLM + CE vs. CE". Once CE is defined, add it as a column and pass `--baseline ce`, then `--baseline sue ce`.
 - **Gemini covers Q4 only** until its 2025 run finishes; rerun the script then.
 - **Qwen's sample is Sean's run joined to this pipeline build:** 7 in-sample calls have no Qwen score and 6 Qwen calls are not in this build's sample (the joint-call company assignment of step 1 picks differently between pulls).
 - **CRSP daily ends 2025-12-31,** so an event on that date would have no t+1. No event in the sample is dated that late (the last is 2025-12-24).
