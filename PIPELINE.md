@@ -373,7 +373,7 @@ Large caps: US-incorporated, market cap ≥ $10bn the day before the event. Each
 
 ## 7. Replication checks and industry mapping
 
-Additions that sit next to the pipeline. Sections 7.1 to 7.4 come from an independent replication built on Compustat prices; 7.5 and 7.6 run the LLM scores through the same prices.
+Additions that sit next to the pipeline. Sections 7.1 to 7.4 come from an independent replication built on Compustat prices; 7.5 and 7.6 run the LLM scores through the same prices. 7.7 uses the pipeline's own sample and CRSP returns for all four quarters of 2025.
 
 ### 7.1 Independent baseline and event-date alignment
 
@@ -629,3 +629,47 @@ uv run python scripts/llm_industry_r2.py <folder with the cleaned files> out
 Writes `llm_industry_r2.csv`, one row per run and group, with the interval. Same folder as section 7.5.
 
 **Limits:** one quarter; SIC is the value at the download date (section 7.3); the Health and Money SIC ranges are not yet checked against French's website (section 7.3), and they are the two industries the conclusions rest on; the ten second share classes of section 7.5 are in the sample.
+
+### 7.7 Announcement-window validation 
+
+*"Validate the measurement on the EAD window first. Does LLM + CE explain more of the t−1…t+1 CAR than CE alone? Incremental adj. R² on the announcement return."* Sections 6, 7.5 and the factor backtest ask whether the score can be traded after day 0; this asks whether it measures the news at all, on the days the news comes out. It is also the **first result on all four quarters of 2025** (Sean's Qwen run); everything above is Q4 2025 only. (Currently CE is just our SUE built from (actual-conensus)/price)
+
+| Decision | What we do |
+|---|---|
+| Events | The pipeline's estimation sample (`in_sample`, step 6) for 2025, with an LLM score and both returns: **10,298** for Qwen (2,491 / 2,631 / 2,593 / 2,583 by quarter) |
+| Returns | **day 0:** `r_abn` (step 5). **t−1…t+1:** the stock's CRSP daily return minus VTI's, summed over the trading day before, the event date and the day after (`crsp.dsf_v2`, as in step 5). Same events in both windows |
+| Baseline | **The surprise (`sue`) for now.** CE is not in the pipeline yet and its definition is to be confirmed with NTAM; the script takes the baseline as a list, so it can be added without changing anything else |
+| Regressions | Inside each quarter, the return, the baseline and the LLM score are turned into percentile ranks (as in step 6). R² base: return on the baseline; R² both: return on the baseline and the LLM score; ΔR² = R² both − R² base. Pooled: the four quarters stacked, ranks still within quarter |
+| Interval | Paired 99% bootstrap of ΔR², 1,000 resamples of events with replacement inside each quarter |
+| Adjusted R² | Reported next to ΔR²; with about 2,500 events a quarter and one added regressor it differs from ΔR² by at most 0.001 |
+
+**Qwen, own summaries** (baseline: surprise):
+
+| Window | | 2025 Q1 | 2025 Q2 | 2025 Q3 | 2025 Q4 | Pooled |
+|---|---|---|---|---|---|---|
+| Day 0 | R² surprise | 0.055 | 0.106 | 0.082 | 0.048 | 0.071 |
+| | R² surprise + LLM | 0.081 | 0.154 | 0.132 | 0.102 | 0.115 |
+| | **ΔR² [99% CI]** | 0.026 [0.012, 0.044] | 0.048 [0.029, 0.068] | 0.050 [0.030, 0.074] | 0.054 [0.034, 0.077] | **0.044** [0.035, 0.056] |
+| t−1…t+1 | R² surprise | 0.043 | 0.115 | 0.070 | 0.045 | 0.066 |
+| | R² surprise + LLM | 0.070 | 0.166 | 0.130 | 0.105 | 0.115 |
+| | **ΔR² [99% CI]** | 0.027 [0.012, 0.044] | 0.050 [0.031, 0.074] | 0.060 [0.039, 0.084] | 0.060 [0.039, 0.085] | **0.049** [0.039, 0.059] |
+
+**Gemini 2.5 Flash-Lite, Q4 2025 only** (its Q1–Q3 run is in progress): ΔR² 0.063 [0.039, 0.090] on day 0 and 0.067 [0.045, 0.092] over t−1…t+1 on its own summaries; 0.062 and 0.064 scoring Qwen's summaries.
+
+- **The measurement holds in every quarter.** The LLM adds to the surprise in all four quarters and both windows, and every 99% interval is above 0. Pooled, it adds 0.044 on day 0 and 0.049 over t−1…t+1.
+- **The three-day window gives the same answer as day 0,** slightly larger (by 0.001 to 0.010 per quarter). So the day-0 result is not an artifact of event-date timing: widening the window to catch releases dated a day early or late does not lose the effect.
+- **Q1 is weaker:** ΔR² 0.026 to 0.027, about half of Q2 to Q4, with an interval that still excludes 0. Q4, the quarter all earlier sections use, is the strongest, so the Q4-only numbers above are on the high side of the year.
+- **Check against earlier sections:** Qwen's Q4 day-0 ΔR² is 0.054, against 0.055 in [`llm_results.ipynb`](src/llm_based_earnings_surprise_ntam/further_study/llm_results.ipynb) (raw score instead of its rank) and 0.053 in section 7.6 (Compustat-panel sample). Gemini's 0.063 compares with 0.061 there.
+
+```bash
+uv run python scripts/llm_ead_r2.py out                                   # baseline: sue
+uv run python scripts/llm_ead_r2.py out --baseline sue ce --extra ce.parquet   # once CE exists
+```
+
+Reads the final dataset and the LLM files for the period in `config.yaml` (set to 2025-01-01 to 2025-12-31 for the table above): `llm_merged_<period>.parquet` for Sean's Qwen run and every run in `llm_scores.parquet` with at least 500 calls. Pulls CRSP daily returns once and caches them in `data/interim/crsp_daily_<period>.parquet`. Writes `out/llm_ead_r2_results.csv`, one row per run, window and quarter (plus pooled), with the interval. Quarters where a run has fewer than 1,000 events (a run still in progress) are left out (`--min-quarter`).
+
+**Limits:**
+- **No CE yet,** so this answers "LLM + surprise vs. surprise", not NTAM's "LLM + CE vs. CE". Once CE is defined, add it as a column and pass `--baseline ce`, then `--baseline sue ce`.
+- **Gemini covers Q4 only** until its 2025 run finishes; rerun the script then.
+- **Qwen's sample is Sean's run joined to this pipeline build:** 7 in-sample calls have no Qwen score and 6 Qwen calls are not in this build's sample (the joint-call company assignment of step 1 picks differently between pulls).
+- **CRSP daily ends 2025-12-31,** so an event on that date would have no t+1. No event in the sample is dated that late (the last is 2025-12-24).
