@@ -1,0 +1,102 @@
+# Every setting for the LLM runs that feed the grid (trend runs A/B/C, persistence run P, baseline run 0).
+# Nothing else is read: not the pipeline's config.yaml, and none of the pipeline or LLM-step code.
+#
+# Input: the LLM step's merged file for all of 2025 (llm_merge): in-sample calls with their summary, the surprise and
+# its rank. The calls of `quarter` are scored; the earlier quarters only supply each call's history.
+# Relative paths are relative to the folder you run from (the repo root).
+
+paths:
+  data: data/grid_analysis/llm_merged_20250101_20251231_us.parquet
+  out: data/grid_analysis/llm_runs        # one folder per run (out/<run>/), plus out/scores_<run>.parquet from `collect`
+
+quarter: 2025Q4                           # event_quarter of the calls to score
+history_quarters: 3                       # earlier event quarters shown to runs A/B/C/P (oldest first)
+
+ollama:
+  host: null                              # null = $OLLAMA_HOST (run_llm_runs.sh sets one port per job), else 127.0.0.1:11434
+  binary_dir: /project/finm36000/ntam_llm/ollama-0.24.0/bin   # read by run_llm_runs.sh only
+  models_dir: /project/finm36000/ntam_llm/models              # read by run_llm_runs.sh only
+  num_parallel: 2                         # requests in flight at once (server slots and client threads)
+  num_ctx: 8192                           # context window; the longest prompt (4 summaries) is about 1,500 tokens
+  timeout_seconds: 600                    # per request
+  retries: 3                              # per request, for server errors and for replies that are not the required JSON
+
+model:                                    # the model of the full Q4 2025 run, which produced the file's `prediction`
+  model: qwen3:30b-a3b-instruct-2507-q4_K_M
+  temperature: 0
+  think: false
+
+# What each run sends. `prompt` picks a prompt below; `history` lists the pieces put before the call, in order:
+# summaries = the earlier calls' summaries, numbers = one line of earlier results (EPS vs consensus, beat/miss, rank).
+runs:
+  base: {prompt: reaction, history: []}                     # run 0: the base prompt; the file already has its scores
+  A:    {prompt: reaction, history: [summaries]}
+  B:    {prompt: reaction, history: [numbers]}
+  C:    {prompt: reaction, history: [summaries, numbers]}
+  P:    {prompt: persistence, history: [summaries, numbers]}
+
+history:                                  # {summaries} and {numbers} are filled per call (history.py)
+  summaries: |-
+    Summaries of this company's earlier earnings calls, oldest first:
+    <earlier_calls>
+    {summaries}
+    </earlier_calls>
+  numbers: |-
+    {numbers}
+
+# {history} is replaced by the run's history pieces (each followed by a blank line), or by nothing for run 0;
+# {text} by the call's summary. With no history, `reaction` is exactly the LLM step's scorer prompt (llm/llm_score.py).
+prompts:
+  reaction:                               # output: prediction (0-1) + reasons
+    system: |-
+      You are an equity analyst predicting the stock market's reaction to an earnings call.
+      Use only the information provided. Do not use outside knowledge about this company
+      or how its stock actually moved.
+    user: |-
+      Your task is to predict how this stock's one-day abnormal return (stock minus market)
+      will rank against all other companies reporting earnings this quarter.
+
+      Be mindful that markets price news relative to expectations. Strong results that were
+      already expected are neutral, not positive. Forward guidance, margins, one-time items and
+      management's tone in the Q&A often matter more than the headline numbers.
+
+      Steps:
+      1. Identify the key news: results, guidance changes, one-time items, risks.
+      2. Judge whether each item is better or worse than investors likely expected.
+      3. Combine these into a single prediction.
+
+      Return ONLY a JSON object:
+      - "prediction": number from 0 to 1 (0 = worst reaction this quarter, 0.5 = neutral, 1 = best)
+      - "reasons": list of up to 3 short strings
+
+      {history}Earnings call:
+      <call>
+      {text}
+      </call>
+  persistence:                            # output: recurring / one-off shares with reasons + AI/capex
+    system: |-
+      You are an equity analyst judging how persistent a company's earnings results are.
+      Use only the information provided. Do not use outside knowledge about this company
+      or how its stock actually moved.
+    user: |-
+      Your task is to judge how much of this quarter's results will persist into future quarters.
+
+      Consider what drove this quarter's results relative to what investors expected. Estimate what
+      fraction came from recurring drivers of the ongoing business (demand, pricing, market share,
+      cost structure, organic growth) and what fraction came from one-off items (asset sales, tax
+      benefits, impairments, restructuring, litigation, FX or calendar effects, pull-forward of
+      demand). The two fractions must add up to 1. Use management's guidance and the company's
+      earlier calls as evidence of whether the drivers will continue.
+
+      Also say whether management cites AI or capital investment (capex) as a driver of the results
+      or the outlook.
+
+      Return ONLY a JSON object:
+      - "recurring": {"share": number from 0 to 1, "reason": short string}
+      - "one_off": {"share": number from 0 to 1, "reason": short string}
+      - "ai_capex": {"cited": true or false, "reason": short string}
+
+      {history}Earnings call:
+      <call>
+      {text}
+      </call>
