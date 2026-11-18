@@ -6,7 +6,7 @@
 #   uv run doit config=other_config.yaml
 
 period:
-  start: 2025-10-01        # first call date to include (inclusive)
+  start: 2025-01-01        # first call date to include (inclusive)
   end: 2025-12-31          # last call date to include (inclusive)
 
 universe: us               # us     = US-headquartered companies, IBES US file
