@@ -3,7 +3,7 @@
 Runs on Hazel's cleaned files (events_baseline.parquet, prices_clean.parquet, market_ret.parquet), which are
 licensed WRDS data and stay outside this public repo. From the repo root:
 
-    uv run python scripts/long_short_q4_2025.py ../data/processed ../meetings/2026-10-28_week2 \
+    uv run python scripts/long_short_q4_2025.py ../data/processed_extended <output folder> \
         --pipeline data/processed/earnings_calls_ibes_20251001_20251231_us.parquet
 
 `--pipeline` (optional) adds the same test on the pipeline's in-sample calls, the calls the LLM scores, with the
@@ -13,12 +13,14 @@ pipeline's analyst-level SUE as the signal. Writes to the output folder:
     long_short_path.csv        the charts' numbers: cumulative spread and standard error by day
     long_short_chart_all.png   chart: all events, days 0-20
     long_short_chart.png       chart: all events vs large caps, days 0-20 (PIPELINE.md, section 6)
-    long_short_chart_12w.png   backup chart: companies that reported by Nov 3, days 0-60
+    long_short_chart_12w.png   chart: days 0-60, every event with 60 trading days of prices
 
 Signal: the surprise as a percent of the pre-announcement price, sorted into fifths within the sample. Returns:
-Compustat daily (total return where a dividend factor exists) minus VTI. The prices end on 2026-01-30, so the
-12-week window exists only for events up to 2025-11-03. Compustat market caps are wrong for some ADRs (share
-counts at the local-share level), so size cuts use US-incorporated firms only and nothing is value-weighted.
+Compustat daily (total return where a dividend factor exists) minus VTI. Hazel's prices end on 2026-01-30, so on
+her folder the 12-week window exists only for events up to 2025-11-03; the copy that
+scripts/extend_compustat_prices.py writes runs to 2026-04-30 and covers every event. Compustat market caps are
+wrong for some ADRs (share counts at the local-share level), so size cuts use US-incorporated firms only and
+nothing is value-weighted.
 """
 import argparse
 import sys
@@ -123,6 +125,10 @@ def pct(v):
     return f'{v:+.1f}%'.replace('-', '−')
 
 
+def day(ts, year=False):
+    return f'{ts:%b} {ts.day}' + (f', {ts.year}' if year else '')
+
+
 def fitted_text(fig, x, y, s, size, **kw):
     """Figure text that shrinks until it fits inside the figure's right edge."""
     while True:
@@ -217,14 +223,17 @@ def main():
         res.loc[(res.check == check) & (res.window == window), col].iloc[0])
 
     groups, early = ev.event_date, ~np.isnan(stock[:, 60])
+    last, cutoff = returns.columns.max(), ev.event_date[early].max()
+    source = ("Source: I/B/E/S and Compustat daily via WRDS (Hazel's cleaned Q4 2025 files, "
+              f'prices to {day(last, True)}).')
+    tag = '' if early.all() else f' reported by {day(cutoff)}'
+    k_all, k_large = f'all events{tag}, days 0-60', f'US large caps{tag}, days 0-60'
     q_all, q_large = quantile(ev.surprise_pct), quantile(ev.surprise_pct.where(ev.large))
     paths = {
         'all events, days 0-20': spread_path(stock, mkt, q_all, groups, horizon=20),
         'US large caps, days 0-20': spread_path(stock, mkt, q_large, groups, horizon=20),
-        'all events reported by Nov 3, days 0-60': spread_path(stock[early], mkt[early], q_all[early].to_numpy(),
-                                                               groups[early], horizon=60),
-        'US large caps reported by Nov 3, days 0-60': spread_path(
-            stock[early], mkt[early], q_large[early].to_numpy(), groups[early], horizon=60),
+        k_all: spread_path(stock[early], mkt[early], q_all[early].to_numpy(), groups[early], horizon=60),
+        k_large: spread_path(stock[early], mkt[early], q_large[early].to_numpy(), groups[early], horizon=60),
     }
     pd.concat([p.assign(sample=k) for k, p in paths.items()]).to_csv(out / 'long_short_path.csv', index=False)
 
@@ -234,8 +243,7 @@ def main():
          f'All {len(ev):,} events: top fifth minus bottom fifth by surprise, vs VTI',
          20, {0: '0', 5: '1 wk', 10: '2 wk', 15: '3 wk', 20: '4 wk'},
          ['Shaded: 95% band, clustered by event date. Day 0 (not tradable): '
-          f"{pct(100 * get('main', 'day 0'))}.", "Source: I/B/E/S and Compustat daily via WRDS (Hazel's cleaned "
-                                                  'Q4 2025 files).'],
+          f"{pct(100 * get('main', 'day 0'))}.", source],
          out / 'long_short_chart_all.png')
     plot([(paths['all events, days 0-20'], BLUE, f'All {len(ev):,} events', {5: -9, 20: -9}),
           (paths['US large caps, days 0-20'], ORANGE, f'{n_large} large caps (US, ≥ $10bn)', {5: 9, 20: 9})],
@@ -244,17 +252,20 @@ def main():
          20, {0: '0', 5: '1 wk', 10: '2 wk', 15: '3 wk', 20: '4 wk'},
          ['Shaded: 95% band, clustered by event date. Day 0 (not tradable): '
           f"{pct(100 * get('main', 'day 0'))} all, {pct(100 * get('US large caps, market cap >= $10bn', 'day 0'))} "
-          'large caps.', "Source: I/B/E/S and Compustat daily via WRDS (Hazel's cleaned Q4 2025 files)."],
+          'large caps.', source],
          out / 'long_short_chart.png')
     n_early_large = int((early & ev.large.to_numpy()).sum())
-    plot([(paths['all events reported by Nov 3, days 0-60'], BLUE, f'All {int(early.sum()):,} events', {60: -9}),
-          (paths['US large caps reported by Nov 3, days 0-60'], ORANGE, f'{n_early_large} large caps (US, ≥ $10bn)',
-           {60: 9})],
-         '12 weeks out, the gap is too noisy to call',
-         'Companies that reported by Nov 3 (prices end Jan 30)',
+    big = 'US large caps, market cap >= $10bn'
+    noisy = max(abs(get('main', '12 weeks', 't')), abs(get(big, '12 weeks', 't'))) < 2
+    plot([(paths[k_all], BLUE, f'All {int(early.sum()):,} events', {60: -9}),
+          (paths[k_large], ORANGE, f'{n_early_large} large caps (US, ≥ $10bn)', {60: 9})],
+         '12 weeks out, the gap is too noisy to call' if noisy else
+         f"12 weeks out: {pct(100 * get('main', '12 weeks'))} overall, {pct(100 * get(big, '12 weeks'))} in large caps",
+         'Every Q4 announcement: top fifth minus bottom fifth by surprise, vs VTI' if early.all() else
+         f'Companies that reported by {day(cutoff)} (prices end {day(last)})',
          60, {0: '0', 5: '1 wk', 20: '4 wk', 40: '8 wk', 60: '12 wk'},
          ['Shaded: 95% confidence band, clustered by event date. Same signal and returns as the main chart.',
-          "Source: I/B/E/S and Compustat daily via WRDS (Hazel's cleaned Q4 2025 files)."],
+          source],
          out / 'long_short_chart_12w.png')
 
     pd.set_option('display.width', 220)

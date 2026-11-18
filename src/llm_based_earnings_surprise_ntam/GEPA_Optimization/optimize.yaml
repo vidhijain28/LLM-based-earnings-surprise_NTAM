@@ -1,0 +1,92 @@
+# Every setting for the GEPA prompt optimization (static and continuous). Nothing else is read:
+# not the pipeline's config.yaml, and none of the pipeline or LLM-step code.
+#
+# Input: the LLM step's merged file (llm_merge): in-sample calls with their summary, the day-0 return,
+# the surprise, the ranks and the seed prompt's prediction.
+# Relative paths are relative to the folder you run from (the repo root).
+
+paths:
+  data: data/optimize/llm_merged_20251001_20251231_us.parquet
+  runs: data/optimize/runs          # one folder per run: runs/static/<name>, runs/continuous/<name>
+  cache: data/optimize/cache        # every scored (prompt, call) pair; shared by all runs, so nothing is scored twice
+
+ollama:
+  host: null                        # null = $OLLAMA_HOST (run_optimize.sh sets one port per job), else 127.0.0.1:11434
+  binary_dir: /project/finm36000/ntam_llm/ollama-0.24.0/bin   # read by run_optimize.sh only
+  models_dir: /project/finm36000/ntam_llm/models              # read by run_optimize.sh only
+  num_parallel: 2                   # requests in flight at once (server slots and client threads)
+  num_ctx: 8192                     # context window, one value for both roles: Ollama reloads the model when it changes
+  timeout_seconds: 600              # per request
+  retries: 3                        # per request, for server errors and for replies that are not the required JSON
+
+models:
+  scorer:                           # reads a summary, returns the 0-1 prediction
+    model: qwen3:30b-a3b-instruct-2507-q4_K_M
+    temperature: 0
+    think: false
+  reflector:                        # reads a prompt and its misses, writes a revised prompt (GEPA's reflection step)
+    model: qwen3:30b-a3b-instruct-2507-q4_K_M   # keep it the scorer's model: a 24 GB RTX 6000 holds only one
+    temperature: 0.7
+    think: false
+
+# The scorer's prompt. `seed_instructions` is the part GEPA rewrites; `system` and `output_format` stay fixed, so
+# every revision still answers in the same JSON and still forbids outside knowledge. Together they are exactly the
+# prompt of the LLM step's scorer (llm/llm_score.py), which produced the `prediction` column of the data file.
+prompts:
+  system: |-
+    You are an equity analyst predicting the stock market's reaction to an earnings call.
+    Use only the information provided. Do not use outside knowledge about this company
+    or how its stock actually moved.
+  seed_instructions: |-
+    Your task is to predict how this stock's one-day abnormal return (stock minus market)
+    will rank against all other companies reporting earnings this quarter.
+
+    Be mindful that markets price news relative to expectations. Strong results that were
+    already expected are neutral, not positive. Forward guidance, margins, one-time items and
+    management's tone in the Q&A often matter more than the headline numbers.
+
+    Steps:
+    1. Identify the key news: results, guidance changes, one-time items, risks.
+    2. Judge whether each item is better or worse than investors likely expected.
+    3. Combine these into a single prediction.
+  output_format: |-
+    Return ONLY a JSON object:
+    - "prediction": number from 0 to 1 (0 = worst reaction this quarter, 0.5 = neutral, 1 = best)
+    - "reasons": list of up to 3 short strings
+
+    Earnings call:
+    <call>
+    {text}
+    </call>
+
+objective:                          # loss: centered squared error against the residual of the surprise-only regression
+  selection_margin: 0.005           # a revision replaces the current prompt only if its selection-set R² is this much higher
+  feedback_band: 0.05               # errors within +-this are called "about right" in the reflector's feedback
+
+split:                              # inside every training window, by date
+  selection_share: 0.3              # newest 30% of the window = GEPA's selection set (Pareto scores and the final pick)
+  selection_max: 300                # ... at most this many calls; the older rest = GEPA's training set (minibatches)
+
+gepa:
+  minibatch: 5                      # training calls per reflection round
+  candidate_selection: pareto       # how the parent prompt of each round is drawn
+  seed: 0                           # parent draws, minibatches and the reflector's sampling
+
+static:                             # optimize on the early half of the quarter, report on the late half
+  cutoff: median                    # train on event_date <= cutoff, test on the rest; "median" or a date (2025-11-05)
+  budget: 3000                      # scoring calls GEPA may spend
+
+continuous:                         # before each reporting week: re-optimize on all calls announced earlier, then
+                                    # score that week with the frozen prompt; each week starts from last week's prompt
+  burn_in: 250                      # first refit once this many calls are known (Q4 2025: the week of Oct 27)
+  weeks: all                        # all, or a list of week starts (Mondays), e.g. [2025-10-27]
+  budget: 1500                      # scoring calls per refit
+  new_share: 0.5                    # share of each minibatch drawn from calls announced since the previous refit
+
+evaluate:
+  bootstrap: 1000                   # resamples for the 99% intervals (paired: the same draws for every prompt)
+  seed: 0
+  seed_from_file: true              # seed-prompt test predictions from the data file; false = score them again here
+
+check:
+  n_calls: 20                       # calls re-scored with the seed prompt by `check`
